@@ -1,0 +1,11 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - HTTP_PROXY=http://proxy.stadt.hamburg.de:3128
+      - HTTPS_PROXY=http://proxy.stadt.hamburg.de:3128
+      - NO_PROXY=localhost,127.0.0.1
+    volumes:
+      - ./evaluations.db:/app/evaluations.db

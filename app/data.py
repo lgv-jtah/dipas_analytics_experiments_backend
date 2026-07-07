@@ -1,0 +1,70 @@
+"""Loads the parquet dataset into memory and exposes typed accessors."""
+
+from functools import lru_cache
+from pathlib import Path
+
+import pandas as pd
+
+PARQUET_PATH = Path(__file__).parent.parent / "whole_process_contributions_with_comments_250.parquet"
+
+
+@lru_cache(maxsize=1)
+def get_dataframe() -> pd.DataFrame:
+    df = pd.read_parquet(PARQUET_PATH)
+    # Normalise column types
+    df["contribution_id"] = df["contribution_id"].astype(int)
+    return df
+
+
+def get_contributions() -> list[dict]:
+    """Return one record per contribution with its full text."""
+    df = get_dataframe()
+    return (
+        df[["contribution_id", "contributionContent"]]
+        .drop_duplicates("contribution_id")
+        .sort_values("contribution_id")
+        .rename(columns={"contributionContent": "contribution_content"})
+        .to_dict(orient="records")
+    )
+
+
+def get_key_messages(contribution_id: int) -> list[dict]:
+    """Return all predicted key messages for a contribution."""
+    df = get_dataframe()
+    subset = df[df["contribution_id"] == contribution_id]
+    return (
+        subset[
+            [
+                "contribution_id",
+                "contributionContent",
+                "key_message",
+                "key_message_type",
+                "related_sentences",
+                "key_message_explanation",
+            ]
+        ]
+        .drop_duplicates("key_message")
+        .rename(columns={"contributionContent": "contribution_content"})
+        .to_dict(orient="records")
+    )
+
+
+def get_stances(contribution_id: int, key_message: str) -> list[dict]:
+    """Return all predicted stances for a (contribution, key_message) pair."""
+    df = get_dataframe()
+    subset = df[
+        (df["contribution_id"] == contribution_id)
+        & (df["key_message"] == key_message)
+    ]
+    return (
+        subset[
+            [
+                "contribution_id",
+                "key_message",
+                "comment_text",
+                "stance",
+                "explanation",
+            ]
+        ]
+        .to_dict(orient="records")
+    )
