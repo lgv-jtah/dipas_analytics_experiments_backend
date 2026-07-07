@@ -4,10 +4,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import Base, engine
+from app.migrations import sync_schema
 from app.routes import router
 
-# Create all DB tables on startup
+# Create any missing tables, then add any missing nullable columns to
+# existing tables (create_all alone won't do the latter).
 Base.metadata.create_all(bind=engine)
+sync_schema(engine, Base.metadata)
 
 app = FastAPI(
     title="DIPAS Analytics Evaluation API",
