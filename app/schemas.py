@@ -132,3 +132,22 @@ class EvaluationStats(BaseModel):
 
 class TesterEvaluationStats(EvaluationStats):
     tester: str
+
+
+# ---------------------------------------------------------------------------
+# Dataset info schema
+# ---------------------------------------------------------------------------
+
+class DatasetInfoOut(BaseModel):
+    model_name: str
+    dataset_filename: str
+
+
+# ---------------------------------------------------------------------------
+# Reset schema
+# ---------------------------------------------------------------------------
+
+class ResetEvaluationsOut(BaseModel):
+    deleted_key_message_evaluations: int
+    deleted_stance_evaluations: int
+    deleted_added_key_messages: int

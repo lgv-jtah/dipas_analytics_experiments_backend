@@ -12,6 +12,12 @@ uvicorn app.main:app --reload
 The server starts at `http://localhost:8000`.  
 Interactive API docs are at `http://localhost:8000/docs`.
 
+By default the API reads `whole_process_contributions_with_comments_250_deepsseek-v4-pro_deepsseek-v4-pro.parquet` from the project root. To use a different dataset, set the `PARQUET_PATH` environment variable to the path of another parquet file:
+
+```bash
+PARQUET_PATH=./my_other_dataset.parquet uvicorn app.main:app --reload
+```
+
 ---
 
 ## Project structure
@@ -25,7 +31,7 @@ Interactive API docs are at `http://localhost:8000/docs`.
 │   ├── models.py     # SQLAlchemy ORM models (SQLite)
 │   ├── database.py   # DB engine & session factory
 │   └── data.py       # Parquet loader & typed accessors
-├── whole_process_contributions_with_comments_250.parquet
+├── whole_process_contributions_with_comments_250_deepsseek-v4-pro_deepsseek-v4-pro.parquet  # default dataset; override via PARQUET_PATH
 ├── requirements.txt
 └── evaluations.db    # auto-created on first run
 ```

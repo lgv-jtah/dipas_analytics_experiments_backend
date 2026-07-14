@@ -1,11 +1,34 @@
 """Loads the parquet dataset into memory and exposes typed accessors."""
 
+import os
 from functools import lru_cache
+from itertools import groupby
 from pathlib import Path
 
 import pandas as pd
 
-PARQUET_PATH = Path(__file__).parent.parent / "whole_process_contributions_with_comments_250.parquet"
+DEFAULT_PARQUET_FILENAME = "whole_process_contributions_with_comments_250_deepsseek-v4-pro_deepsseek-v4-pro.parquet"
+print("ENV: " + os.environ.get("PARQUET_PATH"))
+PARQUET_PATH = Path(
+    os.environ.get("PARQUET_PATH")
+    or Path(__file__).parent.parent / DEFAULT_PARQUET_FILENAME
+)
+
+# Filenames follow "whole_process_contributions_with_comments_250[_<model>].parquet".
+# The model suffix is sometimes duplicated (e.g. "..._deepseek-v4-pro_deepseek-v4-pro.parquet").
+BASE_DATASET_STEM = "whole_process_contributions_with_comments_250"
+
+
+def get_model_name() -> str:
+    """Derive the evaluated model's name from the parquet filename, or "default" if none is present."""
+    remainder = PARQUET_PATH.stem
+    if remainder.startswith(BASE_DATASET_STEM):
+        remainder = remainder[len(BASE_DATASET_STEM):]
+    remainder = remainder.strip("_")
+    if not remainder:
+        return "default"
+    deduped_tokens = [token for token, _ in groupby(remainder.split("_"))]
+    return "_".join(deduped_tokens)
 
 
 @lru_cache(maxsize=1)

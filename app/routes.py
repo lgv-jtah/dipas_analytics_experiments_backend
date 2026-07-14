@@ -10,10 +10,12 @@ from app.schemas import (
     AddedKeyMessageIn,
     AddedKeyMessageOut,
     ContributionOut,
+    DatasetInfoOut,
     EvaluationStats,
     KeyMessageEvaluationIn,
     KeyMessageEvaluationOut,
     KeyMessageOut,
+    ResetEvaluationsOut,
     StanceEvaluationIn,
     StanceEvaluationOut,
     StanceOut,
@@ -21,6 +23,24 @@ from app.schemas import (
 )
 
 router = APIRouter()
+
+
+# ---------------------------------------------------------------------------
+# Dataset info
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/dataset/model",
+    response_model=DatasetInfoOut,
+    summary="Which model's predictions are currently loaded",
+    tags=["dataset"],
+)
+def get_dataset_info():
+    return DatasetInfoOut(
+        model_name=data.get_model_name(),
+        dataset_filename=data.PARQUET_PATH.name,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -367,3 +387,47 @@ def get_stats_for_tester(tester: str, db: Session = Depends(get_db)):
         .all()
     )
     return TesterEvaluationStats(tester=tester, **_compute_stats(km_evals, stance_evals))
+
+
+# ---------------------------------------------------------------------------
+# Reset
+# ---------------------------------------------------------------------------
+
+
+@router.delete(
+    "/evaluations/reset",
+    response_model=ResetEvaluationsOut,
+    summary="Delete all evaluation data",
+    tags=["evaluations"],
+)
+def reset_evaluations(
+    confirm: bool = Query(
+        default=False,
+        description="Must be set to true to actually perform the reset.",
+    ),
+    db: Session = Depends(get_db),
+):
+    """
+    Empties the key-message evaluations, stance evaluations, and
+    evaluator-added key messages tables. Use this after switching to a
+    different model's parquet dataset so old verdicts don't get mixed up
+    with evaluations of the new model's predictions.
+
+    This does not touch the underlying parquet dataset.
+    """
+    if not confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="Pass confirm=true to permanently delete all evaluation data.",
+        )
+
+    deleted_km = db.query(KeyMessageEvaluation).delete()
+    deleted_stance = db.query(StanceEvaluation).delete()
+    deleted_added = db.query(AddedKeyMessage).delete()
+    db.commit()
+
+    return ResetEvaluationsOut(
+        deleted_key_message_evaluations=deleted_km,
+        deleted_stance_evaluations=deleted_stance,
+        deleted_added_key_messages=deleted_added,
+    )

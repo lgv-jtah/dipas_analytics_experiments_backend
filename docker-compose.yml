@@ -7,5 +7,9 @@ services:
       - HTTP_PROXY=http://proxy.stadt.hamburg.de:3128
       - HTTPS_PROXY=http://proxy.stadt.hamburg.de:3128
       - NO_PROXY=localhost,127.0.0.1
+      # Set PARQUET_PATH to point at a different dataset; must match the mounted path below.
+      - PARQUET_PATH=/app/whole_process_contributions_with_comments_250_mistral-nemo_mistral-nemo.parquet
     volumes:
       - ./evaluations.db:/app/evaluations.db
+      - ./whole_process_contributions_with_comments_250_deepsseek-v4-pro_deepsseek-v4-pro.parquet:/app/whole_process_contributions_with_comments_250_deepsseek-v4-pro_deepsseek-v4-pro.parquet
+      - ./whole_process_contributions_with_comments_250_mistral-nemo_mistral-nemo.parquet:/app/whole_process_contributions_with_comments_250_mistral-nemo_mistral-nemo.parquet
