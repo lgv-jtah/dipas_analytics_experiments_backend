@@ -9,6 +9,7 @@ from app.models import AddedKeyMessage, KeyMessageEvaluation, StanceEvaluation
 from app.schemas import (
     AddedKeyMessageIn,
     AddedKeyMessageOut,
+    AllEvaluationsOut,
     ContributionOut,
     DatasetInfoOut,
     EvaluationStats,
@@ -334,6 +335,41 @@ def list_stance_evaluations(
     if evaluator is not None:
         query = query.filter(StanceEvaluation.evaluator == evaluator)
     return query.all()
+
+
+# ---------------------------------------------------------------------------
+# Combined evaluation export
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/evaluations/all",
+    response_model=AllEvaluationsOut,
+    summary="Export all evaluation data",
+    tags=["evaluations"],
+)
+def get_all_evaluations(
+    evaluator: str | None = Query(
+        default=None, description="Filter all results by evaluator name"
+    ),
+    db: Session = Depends(get_db),
+):
+    """Returns every key-message evaluation, stance evaluation, and
+    evaluator-added key message, optionally filtered to a single evaluator."""
+    km_query = db.query(KeyMessageEvaluation)
+    stance_query = db.query(StanceEvaluation)
+    added_query = db.query(AddedKeyMessage)
+
+    if evaluator is not None:
+        km_query = km_query.filter(KeyMessageEvaluation.evaluator == evaluator)
+        stance_query = stance_query.filter(StanceEvaluation.evaluator == evaluator)
+        added_query = added_query.filter(AddedKeyMessage.evaluator == evaluator)
+
+    return AllEvaluationsOut(
+        key_message_evaluations=km_query.all(),
+        stance_evaluations=stance_query.all(),
+        added_key_messages=added_query.all(),
+    )
 
 
 # ---------------------------------------------------------------------------

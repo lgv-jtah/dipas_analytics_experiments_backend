@@ -116,6 +116,16 @@ class AddedKeyMessageOut(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Combined evaluation export schema
+# ---------------------------------------------------------------------------
+
+class AllEvaluationsOut(BaseModel):
+    key_message_evaluations: list[KeyMessageEvaluationOut]
+    stance_evaluations: list[StanceEvaluationOut]
+    added_key_messages: list[AddedKeyMessageOut]
+
+
+# ---------------------------------------------------------------------------
 # Stats schema
 # ---------------------------------------------------------------------------
 
