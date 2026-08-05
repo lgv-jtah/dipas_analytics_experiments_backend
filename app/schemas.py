@@ -144,6 +144,19 @@ class TesterEvaluationStats(EvaluationStats):
     tester: str
 
 
+class ContributionStatsOut(BaseModel):
+    contribution_id: int
+    key_messages_count: int
+    stances_count: int
+    evaluated_key_messages_count: int
+    evaluated_stances_count: int
+    correct_key_messages_count: int
+    incorrect_key_messages_count: int
+    correct_stances_count: int
+    incorrect_stances_count: int
+    added_key_messages_count: int
+
+
 # ---------------------------------------------------------------------------
 # Dataset info schema
 # ---------------------------------------------------------------------------

@@ -1,5 +1,7 @@
 """FastAPI router for contributions and their predictions."""
 
+from collections import defaultdict
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
@@ -11,6 +13,7 @@ from app.schemas import (
     AddedKeyMessageOut,
     AllEvaluationsOut,
     ContributionOut,
+    ContributionStatsOut,
     DatasetInfoOut,
     EvaluationStats,
     KeyMessageEvaluationIn,
@@ -423,6 +426,81 @@ def get_stats_for_tester(tester: str, db: Session = Depends(get_db)):
         .all()
     )
     return TesterEvaluationStats(tester=tester, **_compute_stats(km_evals, stance_evals))
+
+
+@router.get(
+    "/evaluations/contributions-stats",
+    response_model=list[ContributionStatsOut],
+    summary="Per-contribution evaluation progress",
+    tags=["evaluations"],
+)
+def get_contributions_stats(
+    evaluator: str | None = Query(
+        default=None, description="Restrict evaluation counts to a single evaluator"
+    ),
+    db: Session = Depends(get_db),
+):
+    """
+    Breaks down dataset size and evaluation progress per contribution, so the
+    frontend can show a per-contribution overview instead of only the
+    dataset-wide totals from `/evaluations/stats`.
+
+    `evaluated_key_messages_count` / `evaluated_stances_count` count distinct
+    predictions that have at least one verdict (deduped across evaluators when
+    no `evaluator` filter is given). `correct_*` / `incorrect_*` counts count
+    evaluation records (matching `/evaluations/stats`'s semantics), so they
+    can exceed the evaluated count if multiple evaluators disagreed on the
+    same prediction.
+    """
+    dataset_counts = data.get_contribution_dataset_counts()
+
+    km_query = db.query(KeyMessageEvaluation)
+    stance_query = db.query(StanceEvaluation)
+    added_query = db.query(AddedKeyMessage)
+    if evaluator is not None:
+        km_query = km_query.filter(KeyMessageEvaluation.evaluator == evaluator)
+        stance_query = stance_query.filter(StanceEvaluation.evaluator == evaluator)
+        added_query = added_query.filter(AddedKeyMessage.evaluator == evaluator)
+
+    km_evaluated = defaultdict(set)
+    km_correct = defaultdict(int)
+    km_incorrect = defaultdict(int)
+    for e in km_query.all():
+        km_evaluated[e.contribution_id].add(e.key_message)
+        if e.verdict == "correct":
+            km_correct[e.contribution_id] += 1
+        else:
+            km_incorrect[e.contribution_id] += 1
+
+    stance_evaluated = defaultdict(set)
+    stance_correct = defaultdict(int)
+    stance_incorrect = defaultdict(int)
+    for e in stance_query.all():
+        stance_evaluated[e.contribution_id].add((e.key_message, e.comment_text))
+        if e.verdict == "correct":
+            stance_correct[e.contribution_id] += 1
+        else:
+            stance_incorrect[e.contribution_id] += 1
+
+    added_km_count = defaultdict(int)
+    for a in added_query.all():
+        added_km_count[a.contribution_id] += 1
+
+    return [
+        ContributionStatsOut(
+            contribution_id=cid,
+            key_messages_count=counts["key_messages_count"],
+            stances_count=counts["stances_count"],
+            evaluated_key_messages_count=len(km_evaluated.get(cid, ())),
+            evaluated_stances_count=len(stance_evaluated.get(cid, ())),
+            correct_key_messages_count=km_correct.get(cid, 0),
+            incorrect_key_messages_count=km_incorrect.get(cid, 0),
+            correct_stances_count=stance_correct.get(cid, 0),
+            incorrect_stances_count=stance_incorrect.get(cid, 0),
+            added_key_messages_count=added_km_count.get(cid, 0),
+        )
+        for cid, counts in sorted(dataset_counts.items())
+    ]
 
 
 # ---------------------------------------------------------------------------

@@ -72,6 +72,22 @@ def get_key_messages(contribution_id: int) -> list[dict]:
     )
 
 
+def get_contribution_dataset_counts() -> dict[int, dict[str, int]]:
+    """Return {contribution_id: {key_messages_count, stances_count}} for every contribution."""
+    df = get_dataframe()
+    km_counts = df.drop_duplicates(["contribution_id", "key_message"]).groupby(
+        "contribution_id"
+    ).size()
+    stance_counts = df.groupby("contribution_id").size()
+    return {
+        int(cid): {
+            "key_messages_count": int(km_counts.get(cid, 0)),
+            "stances_count": int(stance_counts.get(cid, 0)),
+        }
+        for cid in df["contribution_id"].unique()
+    }
+
+
 def get_stances(contribution_id: int, key_message: str) -> list[dict]:
     """Return all predicted stances for a (contribution, key_message) pair."""
     df = get_dataframe()
