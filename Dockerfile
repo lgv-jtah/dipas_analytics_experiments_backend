@@ -1,8 +1,8 @@
 FROM python:3.10-slim
 
-ARG HTTP_PROXY=http://proxy.stadt.hamburg.de:3128
-ARG HTTPS_PROXY=http://proxy.stadt.hamburg.de:3128
-ARG NO_PROXY=localhost,127.0.0.1
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
 
 ENV HTTP_PROXY=${HTTP_PROXY} \
     HTTPS_PROXY=${HTTPS_PROXY} \
