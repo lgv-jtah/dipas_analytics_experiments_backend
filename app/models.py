@@ -64,8 +64,10 @@ class StanceEvaluation(Base):
     contribution_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     key_message: Mapped[str] = mapped_column(Text, nullable=False)
     comment_text: Mapped[str] = mapped_column(Text, nullable=False)
+    comment_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # 'correct' | 'incorrect'
     verdict: Mapped[str] = mapped_column(String(20), nullable=False)
+    corrected_label: Mapped[str | None] = mapped_column(String(20), nullable=True)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     evaluator: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -77,6 +79,7 @@ class StanceEvaluation(Base):
             "contribution_id",
             "key_message",
             "comment_text",
+            "comment_index",
             "evaluator",
             name="uq_stance_eval",
         ),

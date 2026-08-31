@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Literal
 
 KeyMessageType = Literal["Zustand", "Wunsch", "Problem", "Qualität"]
+StanceLabel = Literal["in favor", "neutral", "ablehnung"]
 
 from pydantic import BaseModel, Field
 
@@ -55,7 +56,9 @@ class StanceEvaluationIn(BaseModel):
     contribution_id: int
     key_message: str
     comment_text: str
+    comment_index: int | None = Field(default=None, description="Position of comment within key message stances")
     verdict: Verdict
+    corrected_label: StanceLabel | None = Field(default=None, description="Correct label when verdict is 'incorrect'")
     comment: str | None = Field(default=None, description="Optional free-text note")
     evaluator: str | None = Field(default=None, description="Evaluator identifier")
 
@@ -83,7 +86,9 @@ class StanceEvaluationOut(BaseModel):
     contribution_id: int
     key_message: str
     comment_text: str
+    comment_index: int | None
     verdict: Verdict
+    corrected_label: StanceLabel | None
     comment: str | None
     evaluator: str | None
     created_at: datetime

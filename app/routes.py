@@ -287,14 +287,22 @@ def submit_stance_evaluation(
     Record whether the predicted stance for a comment is **correct** or **incorrect**.
 
     If an evaluation from the same evaluator for the same
-    (contribution_id, key_message, comment_text) triple already exists it is **updated**.
+    (contribution_id, key_message, comment_text, comment_index) triple already exists it is **updated**.
     """
+    # Validate: corrected_label is required when verdict is incorrect
+    if payload.verdict == "incorrect" and not payload.corrected_label:
+        raise HTTPException(
+            status_code=400,
+            detail="corrected_label is required when verdict is 'incorrect'"
+        )
+    
     existing = (
         db.query(StanceEvaluation)
         .filter(
             StanceEvaluation.contribution_id == payload.contribution_id,
             StanceEvaluation.key_message == payload.key_message,
             StanceEvaluation.comment_text == payload.comment_text,
+            StanceEvaluation.comment_index == payload.comment_index,
             StanceEvaluation.evaluator == payload.evaluator,
         )
         .first()
@@ -302,6 +310,7 @@ def submit_stance_evaluation(
 
     if existing:
         existing.verdict = payload.verdict
+        existing.corrected_label = payload.corrected_label
         existing.comment = payload.comment
         db.commit()
         db.refresh(existing)
@@ -311,7 +320,9 @@ def submit_stance_evaluation(
         contribution_id=payload.contribution_id,
         key_message=payload.key_message,
         comment_text=payload.comment_text,
+        comment_index=payload.comment_index,
         verdict=payload.verdict,
+        corrected_label=payload.corrected_label,
         comment=payload.comment,
         evaluator=payload.evaluator,
     )
