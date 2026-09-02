@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app import data
 from app.database import get_db
-from app.models import AddedKeyMessage, KeyMessageEvaluation, StanceEvaluation
+from app.models import AddedKeyMessage, AddedStance, KeyMessageEvaluation, StanceEvaluation
 from app.schemas import (
     AddedKeyMessageIn,
     AddedKeyMessageOut,
@@ -136,13 +136,19 @@ def list_stances(contribution_id: int, key_message: str):
     "/evaluations/key-messages/added",
     response_model=AddedKeyMessageOut,
     status_code=201,
-    summary="Save an evaluator-added key message",
+    summary="Save an evaluator-added key message with stances",
     tags=["evaluations"],
 )
 def add_key_message(
     payload: AddedKeyMessageIn,
     db: Session = Depends(get_db),
 ):
+    """
+    Save a new key message identified by an evaluator, along with
+    assigned stance-labeled comments.
+    
+    Requires at least one stance to be provided.
+    """
     existing = (
         db.query(AddedKeyMessage)
         .filter(
@@ -154,12 +160,31 @@ def add_key_message(
     )
 
     if existing:
+        # Update existing key message
         existing.key_message_type = payload.key_message_type
         existing.key_message_sentence = payload.key_message_sentence
+        
+        # Delete old stances and replace with new ones
+        db.query(AddedStance).filter(
+            AddedStance.added_key_message_id == existing.id
+        ).delete()
+        
+        # Add new stances
+        for stance_data in payload.stances:
+            stance = AddedStance(
+                added_key_message_id=existing.id,
+                contribution_id=payload.contribution_id,
+                comment_text=stance_data.comment_text,
+                comment_index=stance_data.comment_index,
+                stance_label=stance_data.stance_label,
+            )
+            db.add(stance)
+        
         db.commit()
         db.refresh(existing)
         return existing
 
+    # Create new key message
     record = AddedKeyMessage(
         contribution_id=payload.contribution_id,
         key_message=payload.key_message,
@@ -168,6 +193,19 @@ def add_key_message(
         evaluator=payload.evaluator,
     )
     db.add(record)
+    db.flush()  # Get the ID before creating stances
+
+    # Create stances
+    for stance_data in payload.stances:
+        stance = AddedStance(
+            added_key_message_id=record.id,
+            contribution_id=payload.contribution_id,
+            comment_text=stance_data.comment_text,
+            comment_index=stance_data.comment_index,
+            stance_label=stance_data.stance_label,
+        )
+        db.add(stance)
+
     db.commit()
     db.refresh(record)
     return record
@@ -176,7 +214,7 @@ def add_key_message(
 @router.get(
     "/evaluations/key-messages/added",
     response_model=list[AddedKeyMessageOut],
-    summary="List evaluator-added key messages",
+    summary="List evaluator-added key messages with stances",
     tags=["evaluations"],
 )
 def list_added_key_messages(
@@ -184,11 +222,18 @@ def list_added_key_messages(
     evaluator: str | None = Query(default=None, description="Filter by evaluator name"),
     db: Session = Depends(get_db),
 ):
+    """Fetch added key messages with their assigned stances."""
+    from sqlalchemy.orm import joinedload
+    
     query = db.query(AddedKeyMessage).filter(
         AddedKeyMessage.contribution_id == contribution_id
     )
     if evaluator is not None:
         query = query.filter(AddedKeyMessage.evaluator == evaluator)
+    
+    # Eager load stances to avoid N+1 queries
+    query = query.options(joinedload(AddedKeyMessage.stances))
+    
     return query.all()
 
 

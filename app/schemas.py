@@ -6,7 +6,7 @@ from typing import Literal
 KeyMessageType = Literal["Zustand", "Wunsch", "Problem", "Qualität"]
 StanceLabel = Literal["in favor", "neutral", "ablehnung"]
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # ---------------------------------------------------------------------------
@@ -100,12 +100,42 @@ class StanceEvaluationOut(BaseModel):
 # Added key message schemas
 # ---------------------------------------------------------------------------
 
+class AddedStanceIn(BaseModel):
+    """Schema for stance within an added key message."""
+    comment_text: str
+    comment_index: int | None = None
+    stance_label: StanceLabel
+
+
+class AddedStanceOut(BaseModel):
+    """Output schema for added stance."""
+    id: int
+    comment_text: str
+    comment_index: int | None
+    stance_label: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class AddedKeyMessageIn(BaseModel):
     contribution_id: int
     key_message: str
     key_message_type: KeyMessageType
     key_message_sentence: str | None = Field(default=None)
     evaluator: str | None = Field(default=None)
+    stances: list[AddedStanceIn] = Field(
+        default_factory=list,
+        description="List of stances to assign to this key message (at least one required)"
+    )
+
+    @field_validator('stances')
+    @classmethod
+    def validate_stances(cls, v):
+        """Require at least one stance."""
+        if not v or len(v) == 0:
+            raise ValueError("At least one stance must be provided")
+        return v
 
 
 class AddedKeyMessageOut(BaseModel):
@@ -115,6 +145,7 @@ class AddedKeyMessageOut(BaseModel):
     key_message_type: str
     key_message_sentence: str | None
     evaluator: str | None
+    stances: list[AddedStanceOut] = []
     created_at: datetime
 
     model_config = {"from_attributes": True}
