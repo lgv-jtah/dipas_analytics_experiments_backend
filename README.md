@@ -61,7 +61,7 @@ Each key message includes `key_message_type` (`Zustand` / `Wunsch` / `Problem` /
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/contributions/{id}/key-messages/{key_message}/stances` | Predicted stances for a (contribution, key message) pair |
+| `GET` | `/contributions/{id}/stances?key_message=...` | Predicted stances for a (contribution, key message) pair |
 
 Each stance entry includes the `comment_text`, `stance` (`in favor` / `neutral` / `ablehnung`), and the model's `explanation`.
 

@@ -107,15 +107,22 @@ def list_key_messages(contribution_id: int):
 
 
 @router.get(
-    "/contributions/{contribution_id}/key-messages/{key_message}/stances",
+    "/contributions/{contribution_id}/stances",
     response_model=list[StanceOut],
     summary="Get predicted stances for a key message",
     tags=["stances"],
 )
-def list_stances(contribution_id: int, key_message: str):
+def list_stances(
+    contribution_id: int,
+    key_message: str = Query(..., description="Exact key message text"),
+):
     """
     Returns all comments and their predicted stance
     (`in favor` | `neutral` | `ablehnung`) for a given key message.
+
+    `key_message` is a query parameter (not a path segment) because key
+    message text is free-form and may contain characters like `/` that
+    can't be reliably round-tripped through a URL path segment.
     """
     rows = data.get_stances(contribution_id, key_message)
     if not rows:
