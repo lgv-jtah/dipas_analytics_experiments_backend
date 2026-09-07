@@ -3,7 +3,7 @@
 from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app import data
 from app.database import get_db
@@ -223,8 +223,6 @@ def list_added_key_messages(
     db: Session = Depends(get_db),
 ):
     """Fetch added key messages with their assigned stances."""
-    from sqlalchemy.orm import joinedload
-    
     query = db.query(AddedKeyMessage).filter(
         AddedKeyMessage.contribution_id == contribution_id
     )
@@ -512,7 +510,7 @@ def get_contributions_stats(
 
     km_query = db.query(KeyMessageEvaluation)
     stance_query = db.query(StanceEvaluation)
-    added_query = db.query(AddedKeyMessage)
+    added_query = db.query(AddedKeyMessage).options(joinedload(AddedKeyMessage.stances))
     if evaluator is not None:
         km_query = km_query.filter(KeyMessageEvaluation.evaluator == evaluator)
         stance_query = stance_query.filter(StanceEvaluation.evaluator == evaluator)
@@ -538,9 +536,15 @@ def get_contributions_stats(
         else:
             stance_incorrect[e.contribution_id] += 1
 
+    # Stance-labeling for an added key message is all-or-nothing (a single
+    # save assigns a label to every comment at once), so "zero stances"
+    # reliably means "not yet labeled" - no partial-completion tracking needed.
     added_km_count = defaultdict(int)
+    added_km_missing_stances = defaultdict(int)
     for a in added_query.all():
         added_km_count[a.contribution_id] += 1
+        if not a.stances:
+            added_km_missing_stances[a.contribution_id] += 1
 
     return [
         ContributionStatsOut(
@@ -554,6 +558,7 @@ def get_contributions_stats(
             correct_stances_count=stance_correct.get(cid, 0),
             incorrect_stances_count=stance_incorrect.get(cid, 0),
             added_key_messages_count=added_km_count.get(cid, 0),
+            added_key_messages_missing_stances_count=added_km_missing_stances.get(cid, 0),
         )
         for cid, counts in sorted(dataset_counts.items())
     ]

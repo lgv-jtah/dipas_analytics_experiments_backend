@@ -191,6 +191,7 @@ class ContributionStatsOut(BaseModel):
     correct_stances_count: int
     incorrect_stances_count: int
     added_key_messages_count: int
+    added_key_messages_missing_stances_count: int
 
 
 # ---------------------------------------------------------------------------
