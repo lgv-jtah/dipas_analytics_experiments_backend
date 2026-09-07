@@ -331,6 +331,14 @@ def submit_stance_evaluation(
 
     If an evaluation from the same evaluator for the same
     (contribution_id, key_message, comment_text, comment_index) triple already exists it is **updated**.
+
+    Evaluations saved before comment_index tracking existed have
+    comment_index = NULL. Since the frontend always sends a real index
+    now, an exact match would never find those legacy rows - instead of
+    silently creating a duplicate, we fall back to adopting the single
+    unambiguous legacy row for this (contribution_id, key_message,
+    comment_text, evaluator) combination, if one exists, and upgrade its
+    comment_index to the incoming value.
     """
     # Validate: corrected_label is required when verdict is incorrect
     if payload.verdict == "incorrect" and not payload.corrected_label:
@@ -350,6 +358,22 @@ def submit_stance_evaluation(
         )
         .first()
     )
+
+    if not existing and payload.comment_index is not None:
+        legacy_candidates = (
+            db.query(StanceEvaluation)
+            .filter(
+                StanceEvaluation.contribution_id == payload.contribution_id,
+                StanceEvaluation.key_message == payload.key_message,
+                StanceEvaluation.comment_text == payload.comment_text,
+                StanceEvaluation.comment_index.is_(None),
+                StanceEvaluation.evaluator == payload.evaluator,
+            )
+            .all()
+        )
+        if len(legacy_candidates) == 1:
+            existing = legacy_candidates[0]
+            existing.comment_index = payload.comment_index
 
     if existing:
         existing.verdict = payload.verdict
