@@ -117,3 +117,72 @@ Re-submitting the same `(contribution_id, key_message[, comment_text], evaluator
   "incorrect_stances": 7
 }
 ```
+
+---
+
+## Votes vs. comment stance (descriptive only)
+
+A descriptive view that compares, per contribution, the thumbs-up share among
+votes with the favor share among comment stances. These per-contribution
+figures are **descriptive only** and are **not** part of the pre-registered
+vote-ratio equivalence test.
+
+### Endpoints
+
+All prefixed with `/api/v1`.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/votes-stance/snapshot-info` | Frozen snapshot time, available models, default source/model and the known evaluator list |
+| `GET` | `/votes-stance/overview` | One descriptive row per contribution (vote share, favor share, counts) for the scatter and table |
+| `GET` | `/contributions/{id}/votes-stance` | Vote counts and rolled-up comment stance for one contribution |
+
+`source` selects the comment labels: `gold` (frozen gold labels), `model` (a
+model's predictions; the `model` query param is then required) or `live`
+(resolved from stored human verdicts against the loaded model). For `live`,
+an optional `evaluator` query param restricts to one annotator. An unknown
+`model` or `evaluator` returns 400; an unknown contribution returns 404.
+
+### The data export
+
+The view is backed by a frozen export produced offline by the analysis repo,
+not by any live computation here. It is read from the directory named by the
+`VOTE_STANCE_EXPORT_DIR` environment variable, defaulting to
+`data_exports/votes_stance/`. The directory holds four files: the per-comment
+table (`votes_stance_comments.parquet`), the vote snapshot
+(`votes_snapshot.parquet`), the summary (`votes_stance_export.summary.json`)
+and the completion marker (`artifact_hashes.json`); every artifact is
+hash-verified against the marker on load. If the directory or marker is
+missing the view is simply unavailable (the frontend hides the panel).
+
+To refresh the export, run the exporter in the `stance-detection-app` repo and
+copy the four files into `data_exports/votes_stance/`:
+
+```bash
+# in stance-detection-app/
+uv run python cli.py votes-stance-export
+# then copy the four files from the new
+# dataset/experiments/votes_stance_export_<timestamp>/ directory into
+# this backend's data_exports/votes_stance/
+```
+
+### The `live` source rule
+
+A `live` comment category is resolved per pair from the stored human verdicts,
+then rolled up per comment:
+
+- `correct` → the label the annotator reviewed, i.e. the **loaded model's**
+  label for that pair.
+- `incorrect` with a `corrected_label` → the **corrected** label.
+- `incorrect` without a `corrected_label` → **dropped** (unresolved).
+
+Only verified pairs contribute, so a comment may be rolled up from a subset of
+its pairs. Such partial coverage is reported explicitly (per-contribution
+pairs verified / total and fully- vs. partially-verified comment counts), never
+presented as a full category.
+
+### Running the tests
+
+```bash
+uv run --no-project --with-requirements requirements.txt --with pytest --with pytest-cov --with httpx pytest -q
+```

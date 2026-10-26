@@ -204,6 +204,84 @@ class DatasetInfoOut(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Votes vs. comment stance schemas (descriptive only)
+# ---------------------------------------------------------------------------
+
+VotesStanceSource = Literal["gold", "live", "model"]
+
+
+class VotesBlock(BaseModel):
+    """Frozen-snapshot vote counts for a contribution."""
+    votes_pro: int | None
+    votes_contra: int | None
+    # Fraction of thumbs-up among directional votes, in [0, 1], or None.
+    thumbs_up_share: float | None
+    snapshot_utc: str | None
+
+
+class CommentsBlock(BaseModel):
+    """Rolled-up comment stance counts for a contribution."""
+    source: VotesStanceSource
+    model: str | None
+    n_comments: int
+    favor: int
+    against: int
+    neutral: int
+    mixed: int
+    # favor / (favor + against) as a fraction in [0, 1] (mixed excluded), or None.
+    comment_favor_share: float | None
+    # Live verification coverage (None for gold/model). A live category reflects
+    # only a comment's verified pairs, so these make the partial coverage explicit.
+    live_pairs_verified: int | None = None
+    live_pairs_total: int | None = None
+    live_comments_fully_verified: int | None = None
+    live_comments_partially_verified: int | None = None
+
+
+class ContributionVotesStanceOut(BaseModel):
+    """The votes-vs-stance panel for a single contribution."""
+    contribution_id: int
+    votes: VotesBlock
+    comments: CommentsBlock
+    snapshot_utc: str | None
+
+
+class VotesStanceCounts(BaseModel):
+    """Comment-category counts for one overview row."""
+    favor: int
+    against: int
+    neutral: int
+    mixed: int
+
+
+class VotesStanceOverviewRow(BaseModel):
+    """One descriptive per-contribution row for the scatter and table."""
+    contribution_id: int
+    thumbs_up_share: float | None
+    comment_favor_share: float | None
+    n_comments: int
+    votes_pro: int | None
+    votes_contra: int | None
+    counts: VotesStanceCounts
+    # Live verification coverage (None for gold/model).
+    live_pairs_verified: int | None = None
+    live_pairs_total: int | None = None
+    live_comments_fully_verified: int | None = None
+    live_comments_partially_verified: int | None = None
+
+
+class SnapshotInfoOut(BaseModel):
+    """Export-level metadata for the votes-vs-stance view header."""
+    snapshot_utc: str | None
+    n_contributions: int
+    available_models: list[str]
+    default_model: str | None
+    default_source: VotesStanceSource
+    evaluators: list[str]
+    note: str
+
+
+# ---------------------------------------------------------------------------
 # Reset schema
 # ---------------------------------------------------------------------------
 

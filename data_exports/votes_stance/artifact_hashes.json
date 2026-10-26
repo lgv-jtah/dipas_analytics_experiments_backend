@@ -1,0 +1,9 @@
+{
+  "created_utc": "20261026T103932035667Z",
+  "complete": true,
+  "files": {
+    "votes_stance_comments.parquet": "551e8b31b158d9c290c70ed81a6331710e035b558de039b124448d9dc25ca4a6",
+    "votes_snapshot.parquet": "30bdf70336f11ec9f055a02a7d4ec04b129dd4a8d74028b0cc1d401f1fe5625c",
+    "votes_stance_export.summary.json": "af837bd6ff182c88045280675e8283d5c0fe8a01128f83aa79321975fcd39e03"
+  }
+}

@@ -3,9 +3,10 @@
 from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
-from app import data
+from app import data, votes_stance
 from app.database import get_db
 from app.models import AddedKeyMessage, AddedStance, KeyMessageEvaluation, StanceEvaluation
 from app.schemas import (
@@ -14,16 +15,20 @@ from app.schemas import (
     AllEvaluationsOut,
     ContributionOut,
     ContributionStatsOut,
+    ContributionVotesStanceOut,
     DatasetInfoOut,
     EvaluationStats,
     KeyMessageEvaluationIn,
     KeyMessageEvaluationOut,
     KeyMessageOut,
     ResetEvaluationsOut,
+    SnapshotInfoOut,
     StanceEvaluationIn,
     StanceEvaluationOut,
     StanceOut,
     TesterEvaluationStats,
+    VotesStanceOverviewRow,
+    VotesStanceSource,
 )
 
 router = APIRouter()
@@ -593,6 +598,105 @@ def get_contributions_stats(
         )
         for cid, counts in sorted(dataset_counts.items())
     ]
+
+
+# ---------------------------------------------------------------------------
+# Votes vs. comment stance (descriptive only)
+# ---------------------------------------------------------------------------
+
+
+def _list_evaluators(db: Session) -> list[str]:
+    """Return the distinct, non-empty evaluator names seen in stance evaluations."""
+    rows = (
+        db.query(func.distinct(StanceEvaluation.evaluator))
+        .filter(StanceEvaluation.evaluator.isnot(None))
+        .all()
+    )
+    return sorted(name for (name,) in rows if name)
+
+
+def _check_evaluator(db: Session, evaluator: str | None) -> None:
+    """Allow-list the evaluator query param against the known evaluators.
+
+    Raises:
+        HTTPException: 400 if a non-empty evaluator is not a known name.
+    """
+    if evaluator is not None and evaluator not in _list_evaluators(db):
+        raise HTTPException(status_code=400, detail=f"Unknown evaluator {evaluator!r}")
+
+
+@router.get(
+    "/votes-stance/snapshot-info",
+    response_model=SnapshotInfoOut,
+    summary="Metadata for the votes-vs-stance view",
+    tags=["votes-stance"],
+)
+def get_votes_stance_snapshot_info(db: Session = Depends(get_db)):
+    """Return the frozen snapshot time, available models and evaluator list.
+
+    The figures this view produces are descriptive only (see the returned
+    ``note``) and are not part of the pre-registered vote-ratio test.
+    """
+    info = votes_stance.snapshot_info()
+    return SnapshotInfoOut(
+        **info,
+        default_source=votes_stance.DEFAULT_SOURCE,
+        evaluators=_list_evaluators(db),
+    )
+
+
+@router.get(
+    "/contributions/{contribution_id}/votes-stance",
+    response_model=ContributionVotesStanceOut,
+    summary="Votes vs. comment stance for one contribution",
+    tags=["votes-stance"],
+)
+def get_contribution_votes_stance(
+    contribution_id: int,
+    source: VotesStanceSource = Query(default=votes_stance.DEFAULT_SOURCE),
+    model: str | None = Query(default=None),
+    evaluator: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    """Return the vote counts and rolled-up comment stance for a contribution.
+
+    `source` selects the comment labels: `gold` (frozen gold labels), `model`
+    (a model's predictions; `model` query param required) or `live` (resolved
+    from stored human verdicts against the loaded model). A `live` source with
+    no data yields empty counts rather than an error.
+    """
+    _check_evaluator(db, evaluator)
+    try:
+        return votes_stance.contribution_panel(
+            contribution_id, source=source, model=model, db=db, evaluator=evaluator
+        )
+    except ValueError as exc:
+        # Unknown model (source is already constrained by the Literal type).
+        raise HTTPException(status_code=400, detail=str(exc))
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Contribution not found")
+
+
+@router.get(
+    "/votes-stance/overview",
+    response_model=list[VotesStanceOverviewRow],
+    summary="Per-contribution votes-vs-stance overview",
+    tags=["votes-stance"],
+)
+def get_votes_stance_overview(
+    source: VotesStanceSource = Query(default=votes_stance.DEFAULT_SOURCE),
+    model: str | None = Query(default=None),
+    evaluator: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    """Return one descriptive row per contribution for the scatter and table."""
+    _check_evaluator(db, evaluator)
+    try:
+        return votes_stance.overview(
+            source=source, model=model, db=db, evaluator=evaluator
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 # ---------------------------------------------------------------------------
