@@ -15,3 +15,5 @@ services:
       - ./evaluations.db:/app/evaluations.db
       - ./whole_process_contributions_with_comments_250_deepsseek-v4-pro_deepsseek-v4-pro.parquet:/app/whole_process_contributions_with_comments_250_deepsseek-v4-pro_deepsseek-v4-pro.parquet
       - ./whole_process_contributions_with_comments_250_mistral-nemo_mistral-nemo.parquet:/app/whole_process_contributions_with_comments_250_mistral-nemo_mistral-nemo.parquet
+      # Frozen votes-vs-stance export (read-only); see README "The data export".
+      - ./data_exports/votes_stance:/app/data_exports/votes_stance:ro
