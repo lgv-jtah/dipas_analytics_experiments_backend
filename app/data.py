@@ -8,7 +8,7 @@ from pathlib import Path
 import pandas as pd
 
 DEFAULT_PARQUET_FILENAME = "whole_process_contributions_with_comments_250_deepsseek-v4-pro_deepsseek-v4-pro.parquet"
-print("ENV: " + os.environ.get("PARQUET_PATH"))
+print("ENV: " + str(os.environ.get("PARQUET_PATH")))
 PARQUET_PATH = Path(
     os.environ.get("PARQUET_PATH")
     or Path(__file__).parent.parent / DEFAULT_PARQUET_FILENAME
