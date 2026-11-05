@@ -11,9 +11,15 @@ services:
     environment:
       # Set PARQUET_PATH to point at a different dataset; must match the mounted path below.
       - PARQUET_PATH=/app/whole_process_contributions_with_comments_250_mistral-nemo_mistral-nemo.parquet
+      # Point the backend at the export that carries the key-message and overall
+      # summary artifacts. Until this compose file is rebuilt, the code default
+      # (data_exports/votes_stance) still applies and nothing changes.
+      - VOTE_STANCE_EXPORT_DIR=/app/data_exports/votes_stance_20261105T151906907735Z
     volumes:
       - ./evaluations.db:/app/evaluations.db
       - ./whole_process_contributions_with_comments_250_deepsseek-v4-pro_deepsseek-v4-pro.parquet:/app/whole_process_contributions_with_comments_250_deepsseek-v4-pro_deepsseek-v4-pro.parquet
       - ./whole_process_contributions_with_comments_250_mistral-nemo_mistral-nemo.parquet:/app/whole_process_contributions_with_comments_250_mistral-nemo_mistral-nemo.parquet
       # Frozen votes-vs-stance export (read-only); see README "The data export".
       - ./data_exports/votes_stance:/app/data_exports/votes_stance:ro
+      # Newer export adding the per-key-message and overall-summary artifacts.
+      - ./data_exports/votes_stance_20261105T151906907735Z:/app/data_exports/votes_stance_20261105T151906907735Z:ro

@@ -330,3 +330,156 @@ def test_route_unknown_evaluator_400(export_dir, client, db_session):
         "/api/v1/contributions/10/votes-stance?source=live&evaluator=zzz"
     )
     assert bad_panel.status_code == 400
+
+
+# --------------------------------------------------------------------------
+# Overall summary blocks (gold only)
+# --------------------------------------------------------------------------
+
+
+def test_overall_summary_block_verbatim(export_dir):
+    overall = votes_stance.overall_summary_block()
+    assert overall["pre_registered"] is True
+    assert overall["primary"]["favor"] == 5
+    assert overall["no_clear_stance"] == {"total": 2, "neutral": 1, "mixed": 1}
+    assert overall["n_contributions_with_votes"] == 4
+
+
+def test_shared_contributions_block_flagged_not_pre_registered(export_dir):
+    shared = votes_stance.shared_contributions_block()
+    assert shared["pre_registered"] is False
+    assert shared["both_sides_contributions"] == 2
+    assert shared["pooled"]["difference_pp"] == -5.0
+
+
+def test_summary_blocks_none_for_legacy_export(legacy_export_dir):
+    # An older export without the blocks still loads; the blocks are just None.
+    assert votes_stance.overall_summary_block() is None
+    assert votes_stance.shared_contributions_block() is None
+
+
+# --------------------------------------------------------------------------
+# Per-key-message agreement (gold only)
+# --------------------------------------------------------------------------
+
+
+def test_contribution_key_messages_counts_and_comments(export_dir):
+    rows = votes_stance.contribution_key_messages(10)
+    # Two key messages, in first-appearance order.
+    assert [r["key_message"] for r in rows] == ["km-10-a", "km-10-b"]
+    km_a = rows[0]
+    assert (km_a["favor"], km_a["against"], km_a["neutral"]) == (3, 1, 0)
+    assert km_a["n_with_stance"] == 4
+    assert km_a["too_few"] is False
+    # The comments behind each count are listed, in order.
+    assert [c["comment_text"] for c in km_a["comments"]["favor"]] == [
+        "kmA comment 1",
+        "kmA comment 2",
+        "kmA comment 3",
+    ]
+    assert [c["comment_text"] for c in km_a["comments"]["against"]] == ["kmA comment 4"]
+    assert km_a["comments"]["neutral"] == []
+
+
+def test_contribution_key_messages_too_few(export_dir):
+    rows = votes_stance.contribution_key_messages(20)
+    assert len(rows) == 1
+    km = rows[0]
+    assert (km["favor"], km["against"], km["neutral"]) == (0, 1, 1)
+    assert km["n_with_stance"] == 1
+    assert km["too_few"] is True
+
+
+def test_contribution_key_messages_unknown_raises(export_dir):
+    with pytest.raises(KeyError):
+        votes_stance.contribution_key_messages(999)
+
+
+def test_contribution_key_messages_empty_for_legacy_export(legacy_export_dir):
+    # No artifact -> empty list, never an error.
+    assert votes_stance.contribution_key_messages(10) == []
+
+
+# --------------------------------------------------------------------------
+# Key-message overview (gold only)
+# --------------------------------------------------------------------------
+
+
+def test_key_message_overview_ranks_and_excludes_thin(export_dir):
+    overview = votes_stance.key_message_overview()
+    agreed = overview["most_agreed"]
+    rejected = overview["most_rejected"]
+    # km-20-a is too thin (1 stance comment) and appears in neither list.
+    assert all(i["key_message"] != "km-20-a" for i in agreed + rejected)
+    # Most agreed: km-10-a (3 in favor) before km-10-b (2 in favor).
+    assert [i["key_message"] for i in agreed] == ["km-10-a", "km-10-b"]
+    # Most rejected: both have 1 against, tiebreak on against share -> km-10-b
+    # (1/3) ranks above km-10-a (1/4).
+    assert [i["key_message"] for i in rejected] == ["km-10-b", "km-10-a"]
+    assert all(not i["too_few"] for i in agreed + rejected)
+
+
+def test_key_message_overview_limit(export_dir):
+    overview = votes_stance.key_message_overview(limit=1)
+    assert len(overview["most_agreed"]) == 1
+    assert overview["most_agreed"][0]["key_message"] == "km-10-a"
+
+
+def test_key_message_overview_empty_for_legacy_export(legacy_export_dir):
+    overview = votes_stance.key_message_overview()
+    assert overview == {"most_agreed": [], "most_rejected": []}
+
+
+# --------------------------------------------------------------------------
+# Routes (gold only; no source/model/evaluator params)
+# --------------------------------------------------------------------------
+
+
+def test_route_votes_stance_summary(export_dir, client):
+    resp = client.get("/api/v1/votes-stance/summary")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["snapshot_utc"] == "20260102T030405060708Z"
+    assert body["overall"]["pre_registered"] is True
+    assert body["overall"]["primary"]["difference_pp"] == -8.6
+    assert body["shared"]["pre_registered"] is False
+    assert body["shared"]["both_sides_contributions"] == 2
+
+
+def test_route_contribution_key_messages(export_dir, client):
+    resp = client.get("/api/v1/contributions/10/votes-stance/key-messages")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert [r["key_message"] for r in body] == ["km-10-a", "km-10-b"]
+    assert body[0]["comments"]["favor"][0]["comment_text"] == "kmA comment 1"
+
+
+def test_route_contribution_key_messages_unknown_404(export_dir, client):
+    resp = client.get("/api/v1/contributions/999/votes-stance/key-messages")
+    assert resp.status_code == 404
+
+
+def test_route_contribution_key_messages_empty_for_legacy(legacy_export_dir, client):
+    resp = client.get("/api/v1/contributions/10/votes-stance/key-messages")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_route_key_message_overview(export_dir, client):
+    resp = client.get("/api/v1/votes-stance/key-messages/overview")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert [i["key_message"] for i in body["most_agreed"]] == ["km-10-a", "km-10-b"]
+
+
+def test_route_key_message_overview_limit_bounds(export_dir, client):
+    # Out-of-range limit is rejected by the Query bounds (ge=1, le=100).
+    assert client.get(
+        "/api/v1/votes-stance/key-messages/overview?limit=0"
+    ).status_code == 422
+    assert client.get(
+        "/api/v1/votes-stance/key-messages/overview?limit=101"
+    ).status_code == 422
+    assert client.get(
+        "/api/v1/votes-stance/key-messages/overview?limit=1"
+    ).status_code == 200

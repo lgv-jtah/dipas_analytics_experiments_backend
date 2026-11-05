@@ -282,6 +282,124 @@ class SnapshotInfoOut(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Votes-vs-stance overall summary schemas (gold only)
+# ---------------------------------------------------------------------------
+
+
+class OverallCI90(BaseModel):
+    """The 90% interval of the pre-registered point difference."""
+    low: float
+    high: float
+    equivalent: bool
+
+
+class OverallPrimary(BaseModel):
+    """The pre-registered headline figures, copied verbatim from the export."""
+    favor: int
+    against: int
+    neutral: int
+    mixed: int
+    favor_share: float
+    vote_pro: int
+    vote_contra: int
+    vote_share: float
+    difference_pp: float
+    ci90: OverallCI90
+
+
+class NoClearStance(BaseModel):
+    """Comments with no clear stance: neutral plus mixed."""
+    total: int
+    neutral: int
+    mixed: int
+
+
+class OverallSummaryOut(BaseModel):
+    """The pre-registered thumbs-vs-comment-stance headline block."""
+    pre_registered: bool
+    primary: OverallPrimary
+    n_comments: int
+    no_clear_stance: NoClearStance
+    n_contributions_with_votes: int
+    interpretation_rules: str
+
+
+class SharedCI90(BaseModel):
+    """A 90% range for one exploratory shared-contributions figure."""
+    low: float
+    high: float
+
+
+class SharedBlock(BaseModel):
+    """One shared-contributions gap (pooled or unweighted) with its range."""
+    difference_pp: float
+    ci90: SharedCI90
+
+
+class SharedContributionsOut(BaseModel):
+    """The exploratory, not-pre-registered shared-contributions block."""
+    pre_registered: bool
+    note: str
+    thumbs_side_contributions: int
+    comment_side_contributions: int
+    both_sides_contributions: int
+    pooled: SharedBlock
+    unweighted: SharedBlock
+
+
+class VotesStanceSummaryOut(BaseModel):
+    """The overall votes-vs-stance summary: pre-registered plus exploratory."""
+    snapshot_utc: str | None
+    overall: OverallSummaryOut | None
+    shared: SharedContributionsOut | None
+
+
+# ---------------------------------------------------------------------------
+# Per-key-message agreement schemas (gold only)
+# ---------------------------------------------------------------------------
+
+
+class KeyMessageComment(BaseModel):
+    """One citizen comment behind a key-message stance count."""
+    comment_text: str
+
+
+class KeyMessageStanceComments(BaseModel):
+    """The comments behind each stance count for one key message."""
+    favor: list[KeyMessageComment]
+    against: list[KeyMessageComment]
+    neutral: list[KeyMessageComment]
+
+
+class ContributionKeyMessageOut(BaseModel):
+    """Gold agreement/disagreement for one key message of a contribution."""
+    key_message: str
+    favor: int
+    against: int
+    neutral: int
+    n_with_stance: int
+    too_few: bool
+    comments: KeyMessageStanceComments
+
+
+class KeyMessageOverviewItem(BaseModel):
+    """One ranked key message in the agreement/rejection overview."""
+    contribution_id: int
+    key_message: str
+    favor: int
+    against: int
+    neutral: int
+    n_with_stance: int
+    too_few: bool
+
+
+class KeyMessageOverviewOut(BaseModel):
+    """The most agreed-with and most rejected gold key messages."""
+    most_agreed: list[KeyMessageOverviewItem]
+    most_rejected: list[KeyMessageOverviewItem]
+
+
+# ---------------------------------------------------------------------------
 # Reset schema
 # ---------------------------------------------------------------------------
 

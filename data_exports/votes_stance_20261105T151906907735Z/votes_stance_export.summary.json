@@ -1,0 +1,123 @@
+{
+  "schema_version": "votes_stance_export_v1",
+  "created_utc": "20261105T151906907735Z",
+  "module_sha256": "62d2b72d746f7cfcdf44b776b718c118347b22730d99b68d95e313ded5bad27a",
+  "descriptive_only_note": "These per-contribution figures are descriptive only and are not part of the pre-registered vote-ratio test.",
+  "inputs": {
+    "pairs": {
+      "path": "dataset/pairs.parquet",
+      "sha256": "22a62d0b6846267210b4fbc9cf448f8e853e10083f789a45cd6f1af91874aa1b"
+    },
+    "models": {
+      "base": {
+        "path": "data/whole_process_contributions_with_comments_250.parquet",
+        "sha256": "9a5ae8e386b98c74844443a4b82e772327deb3b1248423c8e7b9ff8003171ad7"
+      },
+      "deepsseek-v4-pro": {
+        "path": "data/whole_process_contributions_with_comments_250_deepsseek-v4-pro_deepsseek-v4-pro.parquet",
+        "sha256": "37071bc6af6cfcd0d06b6c7060b914cf889009df9a3e0d5e92b51aa57d6019e8"
+      },
+      "gptoss-120b": {
+        "path": "data/whole_process_contributions_with_comments_250_gptoss-120b_gptoss-120b.parquet",
+        "sha256": "0c86eca6b55667ea6caabcae8f77e9cf2877c9d7d99d9e73585bfff9641c1c45"
+      },
+      "llama-31-405b-fp8": {
+        "path": "data/whole_process_contributions_with_comments_250_llama-31-405b-fp8_llama-31-405b-fp8.parquet",
+        "sha256": "3b5493e89d8cb50eee2f1c3267cf26a27a9335de3438f44c82a5e64669721138"
+      },
+      "mistral-nemo": {
+        "path": "data/whole_process_contributions_with_comments_250_mistral-nemo_mistral-nemo.parquet",
+        "sha256": "4208583a6bf4580e6ba5c18cf56741eca4033df75db4f691460767c45330d079"
+      }
+    },
+    "votes_snapshot": {
+      "path": "dataset/experiments/vote_ratio_votes_20261026T094846675419Z",
+      "snapshot_utc": "20261026T094846675419Z",
+      "sha256": "30bdf70336f11ec9f055a02a7d4ec04b129dd4a8d74028b0cc1d401f1fe5625c"
+    },
+    "overall_analysis": {
+      "path": "dataset/experiments/vote_ratio_analysis_20261026T094931373229Z/vote_ratio_analysis.summary.json",
+      "sha256": "f79107d66ce4d53dd9a1d60f9618380b8dfdd610a9a33e8a10420cfedccf3785"
+    }
+  },
+  "available_models": [
+    "base",
+    "deepsseek-v4-pro",
+    "gptoss-120b",
+    "llama-31-405b-fp8",
+    "mistral-nemo"
+  ],
+  "snapshot_utc": "20261026T094846675419Z",
+  "counts": {
+    "comments": 246,
+    "contributions": 115,
+    "key_message_rows": 707,
+    "key_messages": 320,
+    "votes_rows": 115,
+    "gold_favor_counts": {
+      "favor": 130,
+      "against": 31,
+      "neutral": 74,
+      "mixed": 11
+    }
+  },
+  "overall_summary": {
+    "pre_registered": true,
+    "primary": {
+      "favor": 130,
+      "against": 31,
+      "neutral": 74,
+      "mixed": 11,
+      "favor_share": 80.74534161490683,
+      "neutral_share": 30.08130081300813,
+      "vote_pro": 780,
+      "vote_contra": 97,
+      "vote_share": 88.93956670467503,
+      "difference_pp": -8.194225089768196,
+      "resamples_dropped_zero_denominator": 0,
+      "ci90": {
+        "low": -14.641541690283395,
+        "high": -1.0660589809010852,
+        "equivalent": false
+      },
+      "ci95": {
+        "low": -15.787513560861797,
+        "high": 0.47380712764915023,
+        "equivalent": false
+      }
+    },
+    "n_comments": 246,
+    "no_clear_stance": {
+      "total": 85,
+      "neutral": 74,
+      "mixed": 11
+    },
+    "n_contributions_with_votes": 107,
+    "interpretation_rules": "Equivalence does not prove that stance detection is unnecessary; non-equivalence does not prove that it is necessary. This test answers only whether the overall favor share of comments matches the overall share of thumbs up among votes."
+  },
+  "shared_contributions": {
+    "pre_registered": false,
+    "note": "This shared-contributions comparison was not pre-registered. It restricts both the thumbs side and the comment side to the same contributions (those with at least one thumbs vote and at least one comment carrying a clear stance), which was decided after seeing the data. Read it as exploratory context, not as a confirmatory result.",
+    "thumbs_side_contributions": 107,
+    "comment_side_contributions": 85,
+    "both_sides_contributions": 80,
+    "bootstrap": {
+      "n": 10000,
+      "seed": 20261026
+    },
+    "pooled": {
+      "difference_pp": -4.857893110905152,
+      "ci90": {
+        "low": -11.527092378710163,
+        "high": 3.4853625363590934
+      }
+    },
+    "unweighted": {
+      "difference_pp": -3.9794078766742444,
+      "ci90": {
+        "low": -10.165395057108528,
+        "high": 1.9629527422237847
+      }
+    }
+  }
+}

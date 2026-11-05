@@ -42,9 +42,15 @@ VOTE_STANCE_EXPORT_DIR = Path(
 )
 
 COMMENTS_FILE = "votes_stance_comments.parquet"
+KEY_MESSAGES_FILE = "votes_stance_key_messages.parquet"
 VOTES_FILE = "votes_snapshot.parquet"
 SUMMARY_FILE = "votes_stance_export.summary.json"
 HASHES_FILE = "artifact_hashes.json"
+
+# A key message needs at least this many comments carrying a clear stance
+# (in favour or against) before its agreement/rejection counts are worth
+# showing; below it the counts are too thin to read anything into.
+MIN_COMMENTS_WITH_STANCE = 3
 
 # The per-model comment-category column prefix written by the exporter.
 CATEGORY_PREFIX = "category__"
@@ -180,8 +186,10 @@ def _load_export() -> dict:
 
     Returns:
         A dict with ``comments`` (DataFrame, contribution_id as str), ``votes``
-        (DataFrame, contribution_id as str), ``summary`` (dict) and ``models``
-        (sorted list of model names present in the comments table).
+        (DataFrame, contribution_id as str), ``key_messages`` (DataFrame with
+        contribution_id as str, or ``None`` for an older export that predates
+        the key-message artifact), ``summary`` (dict) and ``models`` (sorted
+        list of model names present in the comments table).
 
     Raises:
         FileNotFoundError: If the export directory or a required file is
@@ -213,12 +221,28 @@ def _load_export() -> dict:
     votes["contribution_id"] = votes["contribution_id"].astype(str)
     summary = json.loads((directory / SUMMARY_FILE).read_text(encoding="utf-8"))
 
+    # The per-key-message artifact is optional: an export produced before this
+    # feature existed simply does not have it, and the view degrades to empty
+    # rather than failing to load the whole export.
+    key_messages_path = directory / KEY_MESSAGES_FILE
+    if key_messages_path.exists():
+        key_messages = pd.read_parquet(key_messages_path)
+        key_messages["contribution_id"] = key_messages["contribution_id"].astype(str)
+    else:
+        key_messages = None
+
     models = sorted(
         col[len(CATEGORY_PREFIX):]
         for col in comments.columns
         if col.startswith(CATEGORY_PREFIX)
     )
-    return {"comments": comments, "votes": votes, "summary": summary, "models": models}
+    return {
+        "comments": comments,
+        "votes": votes,
+        "key_messages": key_messages,
+        "summary": summary,
+        "models": models,
+    }
 
 
 def available_models() -> list[str]:
@@ -622,3 +646,217 @@ def overview(source: str = DEFAULT_SOURCE, model: str | None = None, db=None,
             }
         )
     return rows
+
+
+# --------------------------------------------------------------------------
+# Overall summary blocks (gold only; read straight from the export summary)
+# --------------------------------------------------------------------------
+
+
+def overall_summary_block() -> dict | None:
+    """Return the PRE-REGISTERED overall headline block from the export summary.
+
+    This is the frozen vote-ratio headline the exporter copied verbatim (favor
+    vs. thumbs-up share, the point difference and its 90% interval). It is
+    returned as-is and never recomputed here.
+
+    Returns:
+        The ``overall_summary`` block, or ``None`` for an older export that does
+        not carry it.
+    """
+    return _load_export()["summary"].get("overall_summary")
+
+
+def shared_contributions_block() -> dict | None:
+    """Return the EXPLORATORY shared-contributions block from the export summary.
+
+    This block restricts both sides to the same contributions and is explicitly
+    not pre-registered (it carries its own ``pre_registered: false`` flag and a
+    note). It is returned verbatim from the export.
+
+    Returns:
+        The ``shared_contributions`` block, or ``None`` for an older export that
+        does not carry it.
+    """
+    return _load_export()["summary"].get("shared_contributions")
+
+
+# --------------------------------------------------------------------------
+# Per-key-message agreement / disagreement (gold labels only)
+# --------------------------------------------------------------------------
+
+
+def _comment_texts(rows, label: str) -> list[dict]:
+    """Collect the comment texts of one label for a key-message group.
+
+    Args:
+        rows: The gold key-message rows of a single key message, in their
+            stored (first-appearance) order.
+        label: The canonical label to filter on (in_favor/against/neutral).
+
+    Returns:
+        A list of ``{"comment_text": ...}`` dicts for the matching rows, in
+        order; these are the comments behind that label's count.
+    """
+    return [
+        {"comment_text": row.comment_text}
+        for row in rows.itertuples(index=False)
+        if row.reference_label == label
+    ]
+
+
+def _key_message_counts(rows) -> dict:
+    """Count a key message's gold stance labels across its comments.
+
+    Args:
+        rows: The gold key-message rows of a single key message.
+
+    Returns:
+        A dict with integer ``favor``/``against``/``neutral`` counts, the
+        directional total ``n_with_stance`` (favor + against) and ``too_few``
+        (True when fewer than :data:`MIN_COMMENTS_WITH_STANCE` comments carry a
+        clear stance).
+    """
+    labels = list(rows["reference_label"])
+    favor = labels.count(IN_FAVOR)
+    against = labels.count(AGAINST)
+    neutral = labels.count(NEUTRAL)
+    n_with_stance = favor + against
+    return {
+        "favor": favor,
+        "against": against,
+        "neutral": neutral,
+        "n_with_stance": n_with_stance,
+        "too_few": n_with_stance < MIN_COMMENTS_WITH_STANCE,
+    }
+
+
+def contribution_key_messages(contribution_id: int) -> list[dict]:
+    """Per-key-message gold agreement/disagreement for one contribution.
+
+    Each gold key message of the contribution is returned in first-appearance
+    order with its in-favour / against / neutral comment counts and the comment
+    texts behind each count, so the UI can show what comments express agreement
+    or disagreement with that key message. Hand (gold) labels only.
+
+    Args:
+        contribution_id: The contribution to describe.
+
+    Returns:
+        One dict per gold key message with ``key_message``, the ``favor`` /
+        ``against`` / ``neutral`` counts, ``n_with_stance``, ``too_few`` and a
+        ``comments`` block listing the comment texts per label. Returns an empty
+        list when the key-message artifact is absent (an older export).
+
+    Raises:
+        KeyError: If the artifact is present but the contribution is unknown.
+    """
+    key_messages = _load_export()["key_messages"]
+    # Older export without the artifact: nothing to show, but not an error.
+    if key_messages is None:
+        return []
+    cid = str(contribution_id)
+    contribution_rows = key_messages[key_messages["contribution_id"] == cid]
+    # A contribution with no gold key-message rows is genuinely unknown here.
+    if contribution_rows.empty:
+        raise KeyError(contribution_id)
+
+    results: list[dict] = []
+    # groupby(sort=False) preserves the first-appearance order of the key
+    # messages, which the exporter deliberately froze into the parquet.
+    for key_message, rows in contribution_rows.groupby("key_message", sort=False):
+        counts = _key_message_counts(rows)
+        results.append(
+            {
+                "key_message": key_message,
+                **counts,
+                "comments": {
+                    "favor": _comment_texts(rows, IN_FAVOR),
+                    "against": _comment_texts(rows, AGAINST),
+                    "neutral": _comment_texts(rows, NEUTRAL),
+                },
+            }
+        )
+    return results
+
+
+def _overview_items() -> list[dict]:
+    """Build one ranked item per gold (contribution, key message) pair.
+
+    Each key message is counted on its own; key messages are never grouped
+    across contributions. Only the counts the overview ranks on are produced.
+
+    Returns:
+        A list of ``{contribution_id, key_message, favor, against, neutral,
+        n_with_stance, too_few}`` dicts, one per (contribution, key message).
+    """
+    key_messages = _load_export()["key_messages"]
+    if key_messages is None:
+        return []
+    items: list[dict] = []
+    # Group by the (contribution, key message) pair so each key message is its
+    # own item; sort=False keeps a stable, first-appearance traversal order.
+    for (cid, key_message), rows in key_messages.groupby(
+        ["contribution_id", "key_message"], sort=False
+    ):
+        counts = _key_message_counts(rows)
+        items.append(
+            {
+                "contribution_id": int(cid),
+                "key_message": key_message,
+                **counts,
+            }
+        )
+    return items
+
+
+def key_message_overview(limit: int = 20) -> dict:
+    """The most agreed-with and most rejected gold key messages.
+
+    Both lists exclude key messages with fewer than
+    :data:`MIN_COMMENTS_WITH_STANCE` comments carrying a clear stance, because a
+    key message backed by one or two comments is too thin to rank. The lists
+    report counts only, never percentages, and never group key messages across
+    contributions. Hand (gold) labels only.
+
+    Args:
+        limit: Maximum number of items per list.
+
+    Returns:
+        A dict with ``most_agreed`` (key messages with at least one in-favour
+        comment, most in-favour comments first) and ``most_rejected`` (at least
+        one against comment, most against comments first).
+    """
+    # Only key messages with enough stance-bearing comments can be ranked.
+    eligible = [item for item in _overview_items() if not item["too_few"]]
+
+    def _share(item: dict, numerator: str) -> float:
+        # The directional share used only to break ties between equal counts;
+        # n_with_stance is >= MIN_COMMENTS_WITH_STANCE here, so it is never zero.
+        return item[numerator] / item["n_with_stance"]
+
+    # Most agreed: at least one in-favour comment, ranked by in-favour count,
+    # then by favour share, then stably by contribution id and key message so
+    # the order is fully deterministic.
+    most_agreed = sorted(
+        (item for item in eligible if item["favor"] >= 1),
+        key=lambda item: (
+            -item["favor"],
+            -_share(item, "favor"),
+            item["contribution_id"],
+            item["key_message"],
+        ),
+    )[:limit]
+
+    # Most rejected: at least one against comment, ranked the mirror way.
+    most_rejected = sorted(
+        (item for item in eligible if item["against"] >= 1),
+        key=lambda item: (
+            -item["against"],
+            -_share(item, "against"),
+            item["contribution_id"],
+            item["key_message"],
+        ),
+    )[:limit]
+
+    return {"most_agreed": most_agreed, "most_rejected": most_rejected}

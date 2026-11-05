@@ -13,6 +13,7 @@ from app.schemas import (
     AddedKeyMessageIn,
     AddedKeyMessageOut,
     AllEvaluationsOut,
+    ContributionKeyMessageOut,
     ContributionOut,
     ContributionStatsOut,
     ContributionVotesStanceOut,
@@ -21,6 +22,7 @@ from app.schemas import (
     KeyMessageEvaluationIn,
     KeyMessageEvaluationOut,
     KeyMessageOut,
+    KeyMessageOverviewOut,
     ResetEvaluationsOut,
     SnapshotInfoOut,
     StanceEvaluationIn,
@@ -29,6 +31,7 @@ from app.schemas import (
     TesterEvaluationStats,
     VotesStanceOverviewRow,
     VotesStanceSource,
+    VotesStanceSummaryOut,
 )
 
 router = APIRouter()
@@ -697,6 +700,66 @@ def get_votes_stance_overview(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get(
+    "/votes-stance/summary",
+    response_model=VotesStanceSummaryOut,
+    summary="Overall votes-vs-comment-stance summary (gold only)",
+    tags=["votes-stance"],
+)
+def get_votes_stance_summary():
+    """Return the overall summary: the pre-registered headline plus the
+    exploratory shared-contributions block.
+
+    This view is gold-only: it takes no source, model or evaluator parameters.
+    The ``overall`` block is the pre-registered figure, copied verbatim from the
+    frozen export; the ``shared`` block is explicitly not pre-registered (it
+    carries its own flag and note). Either may be ``null`` for an older export
+    that predates these blocks.
+    """
+    export = votes_stance._load_export()
+    return VotesStanceSummaryOut(
+        snapshot_utc=export["summary"].get("snapshot_utc"),
+        overall=votes_stance.overall_summary_block(),
+        shared=votes_stance.shared_contributions_block(),
+    )
+
+
+@router.get(
+    "/contributions/{contribution_id}/votes-stance/key-messages",
+    response_model=list[ContributionKeyMessageOut],
+    summary="Per-key-message gold agreement/disagreement for a contribution",
+    tags=["votes-stance"],
+)
+def get_contribution_key_messages(contribution_id: int):
+    """Return the gold agreement/disagreement for each key message.
+
+    This view is gold-only: it takes no source or model parameters. It lists one
+    row per gold key message with in-favour / against / neutral comment counts
+    and the comments behind them. An unknown contribution is a 404; when the
+    key-message artifact is absent (an older export) the list is empty.
+    """
+    try:
+        return votes_stance.contribution_key_messages(contribution_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Contribution not found")
+
+
+@router.get(
+    "/votes-stance/key-messages/overview",
+    response_model=KeyMessageOverviewOut,
+    summary="Most agreed-with and most rejected gold key messages",
+    tags=["votes-stance"],
+)
+def get_key_message_overview(limit: int = Query(20, ge=1, le=100)):
+    """Return the most agreed-with and most rejected gold key messages.
+
+    This view is gold-only. Only key messages with at least three comments
+    carrying a clear stance are listed; counts only, never percentages, and key
+    messages are never grouped across contributions.
+    """
+    return votes_stance.key_message_overview(limit=limit)
 
 
 # ---------------------------------------------------------------------------
