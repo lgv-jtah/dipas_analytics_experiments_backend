@@ -1,0 +1,10 @@
+{
+  "created_utc": "20261105T151906907735Z",
+  "complete": true,
+  "files": {
+    "votes_stance_comments.parquet": "551e8b31b158d9c290c70ed81a6331710e035b558de039b124448d9dc25ca4a6",
+    "votes_stance_key_messages.parquet": "4755e5f04c7a39ecd7ed15e11044b5b4c1fe22acb95126cad74b3b00a8319812",
+    "votes_snapshot.parquet": "30bdf70336f11ec9f055a02a7d4ec04b129dd4a8d74028b0cc1d401f1fe5625c",
+    "votes_stance_export.summary.json": "a8d4f1292ffa862af94b09c944ce2b36c703f216afb726677101e19fd4baa4d4"
+  }
+}

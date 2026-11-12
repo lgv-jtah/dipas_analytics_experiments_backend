@@ -3,27 +3,35 @@
 from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
-from app import data
+from app import data, votes_stance
 from app.database import get_db
 from app.models import AddedKeyMessage, AddedStance, KeyMessageEvaluation, StanceEvaluation
 from app.schemas import (
     AddedKeyMessageIn,
     AddedKeyMessageOut,
     AllEvaluationsOut,
+    ContributionKeyMessageOut,
     ContributionOut,
     ContributionStatsOut,
+    ContributionVotesStanceOut,
     DatasetInfoOut,
     EvaluationStats,
     KeyMessageEvaluationIn,
     KeyMessageEvaluationOut,
     KeyMessageOut,
+    KeyMessageOverviewOut,
     ResetEvaluationsOut,
+    SnapshotInfoOut,
     StanceEvaluationIn,
     StanceEvaluationOut,
     StanceOut,
     TesterEvaluationStats,
+    VotesStanceOverviewRow,
+    VotesStanceSource,
+    VotesStanceSummaryOut,
 )
 
 router = APIRouter()
@@ -593,6 +601,165 @@ def get_contributions_stats(
         )
         for cid, counts in sorted(dataset_counts.items())
     ]
+
+
+# ---------------------------------------------------------------------------
+# Votes vs. comment stance (descriptive only)
+# ---------------------------------------------------------------------------
+
+
+def _list_evaluators(db: Session) -> list[str]:
+    """Return the distinct, non-empty evaluator names seen in stance evaluations."""
+    rows = (
+        db.query(func.distinct(StanceEvaluation.evaluator))
+        .filter(StanceEvaluation.evaluator.isnot(None))
+        .all()
+    )
+    return sorted(name for (name,) in rows if name)
+
+
+def _check_evaluator(db: Session, evaluator: str | None) -> None:
+    """Allow-list the evaluator query param against the known evaluators.
+
+    Raises:
+        HTTPException: 400 if a non-empty evaluator is not a known name.
+    """
+    if evaluator is not None and evaluator not in _list_evaluators(db):
+        raise HTTPException(status_code=400, detail=f"Unknown evaluator {evaluator!r}")
+
+
+@router.get(
+    "/votes-stance/snapshot-info",
+    response_model=SnapshotInfoOut,
+    summary="Metadata for the votes-vs-stance view",
+    tags=["votes-stance"],
+)
+def get_votes_stance_snapshot_info(db: Session = Depends(get_db)):
+    """Return the frozen snapshot time, available models and evaluator list.
+
+    The figures this view produces are descriptive only (see the returned
+    ``note``) and are not part of the pre-registered vote-ratio test.
+    """
+    info = votes_stance.snapshot_info()
+    return SnapshotInfoOut(
+        **info,
+        default_source=votes_stance.DEFAULT_SOURCE,
+        evaluators=_list_evaluators(db),
+    )
+
+
+@router.get(
+    "/contributions/{contribution_id}/votes-stance",
+    response_model=ContributionVotesStanceOut,
+    summary="Votes vs. comment stance for one contribution",
+    tags=["votes-stance"],
+)
+def get_contribution_votes_stance(
+    contribution_id: int,
+    source: VotesStanceSource = Query(default=votes_stance.DEFAULT_SOURCE),
+    model: str | None = Query(default=None),
+    evaluator: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    """Return the vote counts and rolled-up comment stance for a contribution.
+
+    `source` selects the comment labels: `gold` (frozen gold labels), `model`
+    (a model's predictions; `model` query param required) or `live` (resolved
+    from stored human verdicts against the loaded model). A `live` source with
+    no data yields empty counts rather than an error.
+    """
+    _check_evaluator(db, evaluator)
+    try:
+        return votes_stance.contribution_panel(
+            contribution_id, source=source, model=model, db=db, evaluator=evaluator
+        )
+    except ValueError as exc:
+        # Unknown model (source is already constrained by the Literal type).
+        raise HTTPException(status_code=400, detail=str(exc))
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Contribution not found")
+
+
+@router.get(
+    "/votes-stance/overview",
+    response_model=list[VotesStanceOverviewRow],
+    summary="Per-contribution votes-vs-stance overview",
+    tags=["votes-stance"],
+)
+def get_votes_stance_overview(
+    source: VotesStanceSource = Query(default=votes_stance.DEFAULT_SOURCE),
+    model: str | None = Query(default=None),
+    evaluator: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    """Return one descriptive row per contribution for the scatter and table."""
+    _check_evaluator(db, evaluator)
+    try:
+        return votes_stance.overview(
+            source=source, model=model, db=db, evaluator=evaluator
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get(
+    "/votes-stance/summary",
+    response_model=VotesStanceSummaryOut,
+    summary="Overall votes-vs-comment-stance summary (gold only)",
+    tags=["votes-stance"],
+)
+def get_votes_stance_summary():
+    """Return the overall summary: the pre-registered headline plus the
+    exploratory shared-contributions block.
+
+    This view is gold-only: it takes no source, model or evaluator parameters.
+    The ``overall`` block is the pre-registered figure, copied verbatim from the
+    frozen export; the ``shared`` block is explicitly not pre-registered (it
+    carries its own flag and note). Either may be ``null`` for an older export
+    that predates these blocks.
+    """
+    export = votes_stance._load_export()
+    return VotesStanceSummaryOut(
+        snapshot_utc=export["summary"].get("snapshot_utc"),
+        overall=votes_stance.overall_summary_block(),
+        shared=votes_stance.shared_contributions_block(),
+    )
+
+
+@router.get(
+    "/contributions/{contribution_id}/votes-stance/key-messages",
+    response_model=list[ContributionKeyMessageOut],
+    summary="Per-key-message gold agreement/disagreement for a contribution",
+    tags=["votes-stance"],
+)
+def get_contribution_key_messages(contribution_id: int):
+    """Return the gold agreement/disagreement for each key message.
+
+    This view is gold-only: it takes no source or model parameters. It lists one
+    row per gold key message with in-favour / against / neutral comment counts
+    and the comments behind them. An unknown contribution is a 404; when the
+    key-message artifact is absent (an older export) the list is empty.
+    """
+    try:
+        return votes_stance.contribution_key_messages(contribution_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Contribution not found")
+
+
+@router.get(
+    "/votes-stance/key-messages/overview",
+    response_model=KeyMessageOverviewOut,
+    summary="Most agreed-with and most rejected gold key messages",
+    tags=["votes-stance"],
+)
+def get_key_message_overview(limit: int = Query(20, ge=1, le=100)):
+    """Return the most agreed-with and most rejected gold key messages.
+
+    This view is gold-only. Only key messages with at least three comments
+    carrying a clear stance are listed; counts only, never percentages, and key
+    messages are never grouped across contributions.
+    """
+    return votes_stance.key_message_overview(limit=limit)
 
 
 # ---------------------------------------------------------------------------
