@@ -67,6 +67,17 @@ _KEY_MESSAGE_ROWS = [
     (20, "km-20-a", "kmX comment 2", "neutral"),
 ]
 
+# Synthetic highlight spans per gold key message. Each tuple is
+# (contribution_id, key_message, spans) where spans is a list of [start, end]
+# character pairs. km-10-a has two located passages, km-10-b one, and km-20-a is
+# deliberately left with none (its source passage was not located) so the
+# "no passage" path is exercised.
+_SPAN_ROWS = [
+    (10, "km-10-a", [[0, 10], [20, 30]]),
+    (10, "km-10-b", [[5, 15]]),
+    (20, "km-20-a", []),
+]
+
 # Synthetic overall-summary blocks, deliberately NOT the real figures, so a
 # route test proves they are surfaced verbatim from the export.
 _OVERALL_SUMMARY = {
@@ -101,7 +112,8 @@ _SHARED_CONTRIBUTIONS = {
 
 
 def _write_export(directory, snapshot_utc="20260102T030405060708Z",
-                  include_key_messages=True, include_summary_blocks=True):
+                  include_key_messages=True, include_summary_blocks=True,
+                  include_spans=True):
     """Write a complete, hash-marked synthetic export into ``directory``.
 
     Args:
@@ -111,6 +123,8 @@ def _write_export(directory, snapshot_utc="20260102T030405060708Z",
             simulate an older export that predates it).
         include_summary_blocks: Embed the overall-summary and
             shared-contributions blocks (set False for an older export).
+        include_spans: Write the per-key-message span artifact (set False to
+            simulate an export produced before highlights existed).
     """
     directory.mkdir(parents=True, exist_ok=True)
     rows = []
@@ -170,6 +184,24 @@ def _write_export(directory, snapshot_utc="20260102T030405060708Z",
         pd.DataFrame(key_message_rows).to_parquet(key_messages_path, index=False)
         artifacts.append(key_messages_path)
 
+    if include_spans:
+        span_rows = [
+            {
+                "contribution_id": str(cid),
+                "key_message": key_message,
+                "extraction_model": "mistral-nemo",
+                "spans": spans,
+                "n_sentences": len(spans),
+                "n_matched": len(spans),
+                "methods": ["verbatim"] * len(spans),
+                "unmatched": 0,
+            }
+            for cid, key_message, spans in _SPAN_ROWS
+        ]
+        spans_path = directory / votes_stance.SPANS_FILE
+        pd.DataFrame(span_rows).to_parquet(spans_path, index=False)
+        artifacts.append(spans_path)
+
     # Completion marker written last, covering every artifact.
     files = {}
     for path in artifacts:
@@ -198,7 +230,12 @@ def legacy_export_dir(tmp_path, monkeypatch):
     backward-compatibility path (still loads, degrades to empty) can be tested.
     """
     directory = tmp_path / "votes_stance_legacy"
-    _write_export(directory, include_key_messages=False, include_summary_blocks=False)
+    _write_export(
+        directory,
+        include_key_messages=False,
+        include_summary_blocks=False,
+        include_spans=False,
+    )
     monkeypatch.setattr(votes_stance, "VOTE_STANCE_EXPORT_DIR", directory)
     votes_stance._load_export.cache_clear()
     yield directory

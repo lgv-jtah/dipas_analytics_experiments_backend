@@ -166,7 +166,28 @@ likewise exposes no source/model selectors for these views.
   key message of the contribution, in first-appearance order, with in-favour /
   against / neutral comment counts and the comment texts behind each count. An
   unknown contribution is a 404; when the key-message artifact is absent (an
-  older export) the list is empty.
+  older export) the list is empty. Each entry also carries the fields that drive
+  the contribution-page highlights:
+  - `spans` — a list of `{start, end}` half-open character offsets into the
+    contribution text, marking that key message's located source passage(s).
+    Empty when none could be located; empty for every key message when the span
+    artifact is absent.
+  - `highlight_stance` — the highlight **colour category** for those spans,
+    derived from the gold comment counts: `favor` when more comments favour the
+    key message, `against` when more oppose it, `disputed` when the two
+    directional counts are equal and non-zero, and `neutral` when no comment
+    takes a clear stance.
+  - `spans_source` — provenance for the offsets, e.g.
+    `extraction_model:mistral-nemo`, or `null` when no span artifact is present.
+    It makes explicit that the highlighted positions come from the extraction
+    model, **not** from the hand labels.
+
+  **Span offsets index into the extraction model's text.** `spans` are character
+  offsets into the `mistral-nemo` `contributionContent` (that is the text the
+  export measured against), so `PARQUET_PATH` **must** stay pinned to the
+  `mistral-nemo` parquet. The backend serves that same `contribution_content`;
+  pointing `PARQUET_PATH` at a different model would shift the displayed text and
+  make every highlight point at the wrong passage.
 - `GET /votes-stance/key-messages/overview` returns `most_agreed` and
   `most_rejected` lists.
 
@@ -195,6 +216,12 @@ hash-verified against the completion marker on load:
   gold scoring pair at the key-message grain, backing the per-key-message
   endpoints; optional, so an older export without it degrades those views to
   empty rather than failing,
+- the per-key-message highlight spans (`votes_stance_key_message_spans.parquet`)
+  — one row per gold key message giving its located source spans over the
+  `mistral-nemo` contribution text (and the `extraction_model` they index into);
+  it backs the `spans` / `highlight_stance` / `spans_source` fields above. Also
+  optional: an export produced before highlights existed simply has no artifact,
+  `spans_source` is then `null`, and the contribution page shows plain text,
 - the vote snapshot (`votes_snapshot.parquet`),
 - the summary (`votes_stance_export.summary.json`), and
 - the completion marker (`artifact_hashes.json`).

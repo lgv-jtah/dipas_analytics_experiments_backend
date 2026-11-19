@@ -482,6 +482,72 @@ def test_contribution_key_messages_empty_for_legacy_export(legacy_export_dir):
 
 
 # --------------------------------------------------------------------------
+# Highlight stance + spans
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "favor, against, expected",
+    [
+        (3, 1, "favor"),      # more in favour
+        (1, 3, "against"),    # more against
+        (2, 2, "disputed"),   # evenly split, non-zero
+        (0, 0, "neutral"),    # no clear stance either way
+    ],
+)
+def test_highlight_stance(favor, against, expected):
+    assert votes_stance._highlight_stance(favor, against) == expected
+
+
+def test_contribution_key_messages_attach_spans(export_dir):
+    rows = votes_stance.contribution_key_messages(10)
+    km_a, km_b = rows[0], rows[1]
+    # km-10-a has two located passages; spans are plain-int start/end dicts.
+    assert km_a["spans"] == [{"start": 0, "end": 10}, {"start": 20, "end": 30}]
+    assert km_b["spans"] == [{"start": 5, "end": 15}]
+    # 3 favor vs 1 against -> favor highlight; provenance names the model.
+    assert km_a["highlight_stance"] == "favor"
+    assert km_a["spans_source"] == "extraction_model:mistral-nemo"
+
+
+def test_contribution_key_messages_no_located_passage(export_dir):
+    # km-20-a has an against-leaning gold stance but no located passage.
+    rows = votes_stance.contribution_key_messages(20)
+    km = rows[0]
+    assert km["spans"] == []
+    assert km["highlight_stance"] == "against"
+    assert km["spans_source"] == "extraction_model:mistral-nemo"
+
+
+def test_contribution_key_messages_spans_source_none_without_artifact(tmp_path, monkeypatch):
+    # An export WITH key messages but WITHOUT the span artifact: spans are empty
+    # and spans_source is None (no highlights to attribute).
+    from tests.conftest import _write_export
+
+    directory = tmp_path / "votes_stance_nospans"
+    _write_export(directory, include_spans=False)
+    monkeypatch.setattr(votes_stance, "VOTE_STANCE_EXPORT_DIR", directory)
+    votes_stance._load_export.cache_clear()
+    try:
+        rows = votes_stance.contribution_key_messages(10)
+        assert all(r["spans"] == [] for r in rows)
+        assert all(r["spans_source"] is None for r in rows)
+        # The colour category is still derived from the gold counts.
+        assert rows[0]["highlight_stance"] == "favor"
+    finally:
+        votes_stance._load_export.cache_clear()
+
+
+def test_route_contribution_key_messages_spans(export_dir, client):
+    resp = client.get("/api/v1/contributions/10/votes-stance/key-messages")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body[0]["spans"] == [{"start": 0, "end": 10}, {"start": 20, "end": 30}]
+    assert body[0]["highlight_stance"] == "favor"
+    assert body[0]["spans_source"] == "extraction_model:mistral-nemo"
+
+
+# --------------------------------------------------------------------------
 # Key-message overview (gold only)
 # --------------------------------------------------------------------------
 

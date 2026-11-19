@@ -389,6 +389,12 @@ class KeyMessageStanceComments(BaseModel):
     neutral: list[KeyMessageComment]
 
 
+class SpanOut(BaseModel):
+    """A half-open [start, end) character span over the contribution text."""
+    start: int
+    end: int
+
+
 class ContributionKeyMessageOut(BaseModel):
     """Gold agreement/disagreement for one key message of a contribution."""
     key_message: str
@@ -398,6 +404,13 @@ class ContributionKeyMessageOut(BaseModel):
     n_with_stance: int
     too_few: bool
     comments: KeyMessageStanceComments
+    # Highlight spans over the contribution text (the key message's located
+    # source sentences); empty when none were found. ``highlight_stance`` is the
+    # colour category (favor/against/disputed/neutral) and ``spans_source`` names
+    # where the positions come from, or is None when no span artifact is present.
+    spans: list[SpanOut] = []
+    highlight_stance: str = "neutral"
+    spans_source: str | None = None
 
 
 class KeyMessageOverviewItem(BaseModel):

@@ -43,9 +43,15 @@ VOTE_STANCE_EXPORT_DIR = Path(
 
 COMMENTS_FILE = "votes_stance_comments.parquet"
 KEY_MESSAGES_FILE = "votes_stance_key_messages.parquet"
+SPANS_FILE = "votes_stance_key_message_spans.parquet"
 VOTES_FILE = "votes_snapshot.parquet"
 SUMMARY_FILE = "votes_stance_export.summary.json"
 HASHES_FILE = "artifact_hashes.json"
+
+# The model whose extracted source sentences locate each key message's highlight
+# spans in the displayed contribution text. Used only as a fallback label when a
+# spans row does not carry its own ``extraction_model``.
+DEFAULT_EXTRACTION_SPANS_MODEL = "mistral-nemo"
 
 # A key message needs at least this many comments carrying a clear stance
 # (in favour or against) before its agreement/rejection counts are worth
@@ -188,8 +194,10 @@ def _load_export() -> dict:
         A dict with ``comments`` (DataFrame, contribution_id as str), ``votes``
         (DataFrame, contribution_id as str), ``key_messages`` (DataFrame with
         contribution_id as str, or ``None`` for an older export that predates
-        the key-message artifact), ``summary`` (dict) and ``models`` (sorted
-        list of model names present in the comments table).
+        the key-message artifact), ``key_message_spans`` (DataFrame with
+        contribution_id as str, or ``None`` when the span artifact is absent),
+        ``summary`` (dict) and ``models`` (sorted list of model names present in
+        the comments table).
 
     Raises:
         FileNotFoundError: If the export directory or a required file is
@@ -231,6 +239,18 @@ def _load_export() -> dict:
     else:
         key_messages = None
 
+    # The per-key-message span artifact is also optional: an export produced
+    # before it existed simply has no highlights, and the view degrades to empty
+    # spans rather than failing to load.
+    spans_path = directory / SPANS_FILE
+    if spans_path.exists():
+        key_message_spans = pd.read_parquet(spans_path)
+        key_message_spans["contribution_id"] = key_message_spans[
+            "contribution_id"
+        ].astype(str)
+    else:
+        key_message_spans = None
+
     models = sorted(
         col[len(CATEGORY_PREFIX):]
         for col in comments.columns
@@ -240,6 +260,7 @@ def _load_export() -> dict:
         "comments": comments,
         "votes": votes,
         "key_messages": key_messages,
+        "key_message_spans": key_message_spans,
         "summary": summary,
         "models": models,
     }
@@ -825,6 +846,55 @@ def _key_message_counts(rows) -> dict:
     }
 
 
+def _highlight_stance(favor: int, against: int) -> str:
+    """Pick the highlight colour category for a key message from its gold counts.
+
+    Args:
+        favor: Number of comments in favour of the key message.
+        against: Number of comments against it.
+
+    Returns:
+        ``favor`` when more comments favour it, ``against`` when more oppose it,
+        ``disputed`` when the two directional counts are equal and non-zero, and
+        ``neutral`` when no comment takes a clear stance (both counts zero).
+    """
+    if favor > against:
+        return "favor"
+    if against > favor:
+        return "against"
+    if favor > 0:
+        # Equal and non-zero: the comments are split evenly for and against.
+        return "disputed"
+    return "neutral"
+
+
+def _spans_for_contribution(key_message_spans, cid: str) -> dict[str, list[dict]]:
+    """Index one contribution's located highlight spans by key message.
+
+    Args:
+        key_message_spans: The loaded span DataFrame, or ``None`` when the span
+            artifact is absent.
+        cid: The (stringified) contribution id.
+
+    Returns:
+        Maps each key message to a list of ``{"start", "end"}`` dicts (plain
+        ints). A key message with no located span maps to an empty list; an
+        absent artifact yields an empty mapping.
+    """
+    if key_message_spans is None:
+        return {}
+    rows = key_message_spans[key_message_spans["contribution_id"] == cid]
+    by_key_message: dict[str, list[dict]] = {}
+    for row in rows.itertuples(index=False):
+        spans: list[dict] = []
+        # The parquet stores spans as a (possibly numpy) sequence of [start, end]
+        # pairs; normalise each to a plain-int dict for the response.
+        for pair in row.spans:
+            spans.append({"start": int(pair[0]), "end": int(pair[1])})
+        by_key_message[row.key_message] = spans
+    return by_key_message
+
+
 def contribution_key_messages(contribution_id: int) -> list[dict]:
     """Per-key-message gold agreement/disagreement for one contribution.
 
@@ -845,7 +915,8 @@ def contribution_key_messages(contribution_id: int) -> list[dict]:
     Raises:
         KeyError: If the artifact is present but the contribution is unknown.
     """
-    key_messages = _load_export()["key_messages"]
+    export = _load_export()
+    key_messages = export["key_messages"]
     # Older export without the artifact: nothing to show, but not an error.
     if key_messages is None:
         return []
@@ -854,6 +925,17 @@ def contribution_key_messages(contribution_id: int) -> list[dict]:
     # A contribution with no gold key-message rows is genuinely unknown here.
     if contribution_rows.empty:
         raise KeyError(contribution_id)
+
+    key_message_spans = export["key_message_spans"]
+    spans_by_key_message = _spans_for_contribution(key_message_spans, cid)
+    # The provenance label is attached to every key message so the UI can state
+    # that the highlighted positions come from the extraction model, not from the
+    # hand labels. It is None when no span artifact is present (no highlights).
+    spans_source = (
+        None
+        if key_message_spans is None
+        else f"extraction_model:{DEFAULT_EXTRACTION_SPANS_MODEL}"
+    )
 
     results: list[dict] = []
     # groupby(sort=False) preserves the first-appearance order of the key
@@ -869,6 +951,14 @@ def contribution_key_messages(contribution_id: int) -> list[dict]:
                     "against": _comment_texts(rows, AGAINST),
                     "neutral": _comment_texts(rows, NEUTRAL),
                 },
+                # Highlight spans over the contribution text (empty when none were
+                # located), the colour category for those spans, and where the
+                # positions come from.
+                "spans": spans_by_key_message.get(key_message, []),
+                "highlight_stance": _highlight_stance(
+                    counts["favor"], counts["against"]
+                ),
+                "spans_source": spans_source,
             }
         )
     return results
