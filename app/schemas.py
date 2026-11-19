@@ -336,6 +336,21 @@ class SharedBlock(BaseModel):
     ci90: SharedCI90
 
 
+class SharedCounts(BaseModel):
+    """Pooled comment/vote counts over the shared set, for the two stacked bars."""
+    vote_pro: int
+    vote_contra: int
+    # 100 * vote_pro / (vote_pro + vote_contra), or None when that total is 0.
+    vote_share: float | None
+    favor: int
+    against: int
+    neutral: int
+    mixed: int
+    # 100 * favor / (favor + against) (mixed/neutral excluded), or None when 0.
+    favor_share: float | None
+    n_contributions: int
+
+
 class SharedContributionsOut(BaseModel):
     """The exploratory, not-pre-registered shared-contributions block."""
     pre_registered: bool
@@ -345,6 +360,9 @@ class SharedContributionsOut(BaseModel):
     both_sides_contributions: int
     pooled: SharedBlock
     unweighted: SharedBlock
+    # Derived pooled counts the UI draws the two stacked bars from; None for an
+    # export whose shared block predates this feature.
+    counts: SharedCounts | None = None
 
 
 class VotesStanceSummaryOut(BaseModel):
