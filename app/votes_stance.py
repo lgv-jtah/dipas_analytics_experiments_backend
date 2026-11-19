@@ -667,18 +667,112 @@ def overall_summary_block() -> dict | None:
     return _load_export()["summary"].get("overall_summary")
 
 
+def _shared_pooled_counts(export: dict) -> dict:
+    """Derive the pooled shared-contributions counts from the export artifacts.
+
+    Mirrors ``votes_stance_export.compute_shared_contributions`` for the pooled
+    (busy-contributions-weigh-more) side, but returns the raw counts the UI
+    needs to draw the two stacked bars rather than the bootstrap gap. Nothing
+    here is pre-registered; it is the same exploratory restriction to the shared
+    set (contributions that have BOTH a thumbs vote and a comment carrying a
+    clear stance).
+
+    The gold comment categories are read straight from the export's
+    ``gold_category`` column (already rolled up per comment by the exporter). The
+    vote snapshot's rows are the contribution universe: a left join keeps every
+    voted contribution even when it has no comment (its category counts become
+    0). The shared set is then the rows with at least one directional comment
+    (in_favor + against) and at least one thumbs vote. Neutral and mixed comments
+    never feed the favour share, exactly as the pre-registered rule requires, but
+    their totals over the shared set are reported so the UI can caption them.
+
+    Args:
+        export: The loaded export dict (``comments``/``votes`` DataFrames with
+            ``contribution_id`` as str).
+
+    Returns:
+        A dict with ``vote_pro``/``vote_contra`` (summed thumbs over the shared
+        set), ``vote_share`` (100 * pro / (pro + contra), or None when that
+        denominator is 0), ``favor``/``against``/``neutral``/``mixed`` (summed
+        comment categories over the shared set), ``favor_share`` (100 * favor /
+        (favor + against), or None when 0) and ``n_contributions`` (the size of
+        the shared set). Every count is a plain Python int; the shares are float
+        or None.
+    """
+    comments = export["comments"]
+    votes = export["votes"]
+
+    # Per-contribution gold category counts; guarantee all four columns exist so
+    # the arithmetic never raises on a category entirely absent from the data.
+    category_counts = (
+        comments.groupby("contribution_id")["gold_category"]
+        .value_counts()
+        .unstack(fill_value=0)
+        .reset_index()
+    )
+    for column in (IN_FAVOR, AGAINST, NEUTRAL, "mixed"):
+        if column not in category_counts:
+            category_counts[column] = 0
+
+    # The vote snapshot's rows are the universe; a left join keeps every voted
+    # contribution even when it has no comment (its counts become 0).
+    merged = votes.copy()
+    merged["tot"] = merged["votingPro"].fillna(0) + merged["votingContra"].fillna(0)
+    merged = merged.merge(
+        category_counts[["contribution_id", IN_FAVOR, AGAINST, NEUTRAL, "mixed"]],
+        on="contribution_id",
+        how="left",
+    )
+    merged[[IN_FAVOR, AGAINST, NEUTRAL, "mixed"]] = merged[
+        [IN_FAVOR, AGAINST, NEUTRAL, "mixed"]
+    ].fillna(0)
+    merged["directional"] = merged[IN_FAVOR] + merged[AGAINST]
+
+    # The shared set: at least one directional comment AND at least one thumbs.
+    shared = merged[(merged["directional"] > 0) & (merged["tot"] > 0)]
+
+    vote_pro = int(shared["votingPro"].fillna(0).sum())
+    vote_contra = int(shared["votingContra"].fillna(0).sum())
+    favor = int(shared[IN_FAVOR].sum())
+    against = int(shared[AGAINST].sum())
+    neutral = int(shared[NEUTRAL].sum())
+    mixed = int(shared["mixed"].sum())
+
+    thumbs_total = vote_pro + vote_contra
+    directional_total = favor + against
+    return {
+        "vote_pro": vote_pro,
+        "vote_contra": vote_contra,
+        "vote_share": None if thumbs_total == 0 else 100.0 * vote_pro / thumbs_total,
+        "favor": favor,
+        "against": against,
+        "neutral": neutral,
+        "mixed": mixed,
+        "favor_share": (
+            None if directional_total == 0 else 100.0 * favor / directional_total
+        ),
+        "n_contributions": int(len(shared)),
+    }
+
+
 def shared_contributions_block() -> dict | None:
     """Return the EXPLORATORY shared-contributions block from the export summary.
 
     This block restricts both sides to the same contributions and is explicitly
     not pre-registered (it carries its own ``pre_registered: false`` flag and a
-    note). It is returned verbatim from the export.
+    note). The verbatim block from the export is returned with an extra
+    ``counts`` key carrying the derived pooled counts (see
+    :func:`_shared_pooled_counts`) the UI needs to draw the two stacked bars.
 
     Returns:
-        The ``shared_contributions`` block, or ``None`` for an older export that
-        does not carry it.
+        The ``shared_contributions`` block plus a ``counts`` sub-dict, or
+        ``None`` for an older export that does not carry the block.
     """
-    return _load_export()["summary"].get("shared_contributions")
+    export = _load_export()
+    block = export["summary"].get("shared_contributions")
+    if block is None:
+        return None
+    return {**block, "counts": _shared_pooled_counts(export)}
 
 
 # --------------------------------------------------------------------------

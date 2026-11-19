@@ -157,7 +157,11 @@ likewise exposes no source/model selectors for these views.
   difference and its 90% interval) and `shared` (the **not pre-registered**
   shared-contributions block, which carries its own `pre_registered: false` flag
   and a note). Either may be `null` for an older export that predates these
-  blocks.
+  blocks. The `shared` block additionally carries a derived `counts` sub-object
+  (pooled thumbs and comment-stance totals over the shared set, plus the two
+  shares) that the frontend draws its two stacked "shared ideas" bars from; it is
+  computed from the export parquets at serve time and is `null` for an export
+  whose shared block predates this feature.
 - `GET /contributions/{id}/votes-stance/key-messages` lists one entry per gold
   key message of the contribution, in first-appearance order, with in-favour /
   against / neutral comment counts and the comment texts behind each count. An
@@ -207,7 +211,15 @@ The summary carries two blocks that back `GET /votes-stance/summary`:
   that restricts both sides to the contributions having both a thumbs vote and a
   clear-stance comment (`pre_registered: false`, with its own note). See
   `stance-detection-app/docs/votes_stance_key_messages_note.md` for why this does
-  not replace the pre-registered result.
+  not replace the pre-registered result. At serve time the backend also derives a
+  `counts` sub-object for this block (`app.votes_stance._shared_pooled_counts`):
+  the pooled thumbs (`vote_pro`/`vote_contra`) and comment-stance
+  (`favor`/`against`/`neutral`/`mixed`) totals over the shared set, plus
+  `vote_share` and `favor_share`. These back the two "shared ideas" stacked bars
+  in the UI. On the `20261105` export (`VOTE_STANCE_EXPORT_DIR` in
+  `docker-compose`) the shared set is the 80 contributions that have both thumbs
+  and a clear comment: 654/93 thumbs, 129/27 directional comments, plus 44
+  neutral and 8 mixed comments that are counted but excluded from `favor_share`.
 
 Both blocks are optional; an older export without them makes the respective
 field `null`.

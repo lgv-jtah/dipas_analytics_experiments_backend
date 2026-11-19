@@ -3,6 +3,7 @@
 See tests/conftest.py for the synthetic export, the temp SQLite database and
 the in-memory loaded-model frame. The real evaluations.db is never touched.
 """
+import pandas as pd
 import pytest
 
 from app import votes_stance
@@ -358,6 +359,86 @@ def test_summary_blocks_none_for_legacy_export(legacy_export_dir):
     assert votes_stance.shared_contributions_block() is None
 
 
+def test_shared_contributions_block_includes_derived_counts(export_dir):
+    # The verbatim block is returned with a derived ``counts`` sub-dict. On the
+    # synthetic export only contribution 10 is shared (cid 20 has no directional
+    # comment), so the counts are that single contribution's figures.
+    shared = votes_stance.shared_contributions_block()
+    counts = shared["counts"]
+    assert counts["n_contributions"] == 1
+    assert counts["favor"] == 1
+    assert counts["against"] == 1
+    assert counts["neutral"] == 0
+    assert counts["mixed"] == 0
+    assert counts["vote_pro"] == 7
+    assert counts["vote_contra"] == 3
+    assert counts["vote_share"] == 70.0
+    assert counts["favor_share"] == 50.0
+    # The verbatim figures are still present alongside the counts.
+    assert shared["pre_registered"] is False
+    assert shared["both_sides_contributions"] == 2
+
+
+def test_shared_counts_absent_for_legacy_export(legacy_export_dir):
+    # No shared block at all on an older export -> no counts to derive.
+    assert votes_stance.shared_contributions_block() is None
+
+
+def test_shared_pooled_counts_empty_shared_set_gives_none_shares():
+    # A contribution with only neutral/mixed comments has no directional comment,
+    # so it is never in the shared set: both denominators are 0 -> None shares.
+    export = {
+        "comments": pd.DataFrame(
+            {
+                "contribution_id": ["1", "1"],
+                "gold_category": ["neutral", "mixed"],
+            }
+        ),
+        "votes": pd.DataFrame(
+            {"contribution_id": ["1"], "votingPro": [5], "votingContra": [5]}
+        ),
+    }
+    counts = votes_stance._shared_pooled_counts(export)
+    assert counts["n_contributions"] == 0
+    assert counts["vote_pro"] == 0
+    assert counts["vote_contra"] == 0
+    assert counts["favor"] == 0
+    assert counts["against"] == 0
+    assert counts["vote_share"] is None
+    assert counts["favor_share"] is None
+
+
+def test_shared_pooled_counts_sums_neutral_and_mixed_over_shared():
+    # One shared contribution carrying every category: neutral and mixed are
+    # summed over the shared set (they are not in the favour share, but counted).
+    export = {
+        "comments": pd.DataFrame(
+            {
+                "contribution_id": ["1"] * 5,
+                "gold_category": [
+                    "in_favor",
+                    "in_favor",
+                    "against",
+                    "neutral",
+                    "mixed",
+                ],
+            }
+        ),
+        "votes": pd.DataFrame(
+            {"contribution_id": ["1"], "votingPro": [8], "votingContra": [2]}
+        ),
+    }
+    counts = votes_stance._shared_pooled_counts(export)
+    assert counts["n_contributions"] == 1
+    assert counts["favor"] == 2
+    assert counts["against"] == 1
+    assert counts["neutral"] == 1
+    assert counts["mixed"] == 1
+    # favor_share excludes neutral/mixed: 2 / (2 + 1) -> 66.67%.
+    assert counts["favor_share"] == pytest.approx(100.0 * 2 / 3)
+    assert counts["vote_share"] == 80.0
+
+
 # --------------------------------------------------------------------------
 # Per-key-message agreement (gold only)
 # --------------------------------------------------------------------------
@@ -444,6 +525,15 @@ def test_route_votes_stance_summary(export_dir, client):
     assert body["overall"]["primary"]["difference_pp"] == -8.6
     assert body["shared"]["pre_registered"] is False
     assert body["shared"]["both_sides_contributions"] == 2
+    # The derived pooled counts the bars are drawn from are surfaced too.
+    counts = body["shared"]["counts"]
+    assert counts["n_contributions"] == 1
+    assert counts["vote_pro"] == 7
+    assert counts["vote_contra"] == 3
+    assert counts["favor"] == 1
+    assert counts["against"] == 1
+    assert counts["vote_share"] == 70.0
+    assert counts["favor_share"] == 50.0
 
 
 def test_route_contribution_key_messages(export_dir, client):
