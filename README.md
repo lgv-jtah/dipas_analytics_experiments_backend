@@ -134,9 +134,9 @@ All prefixed with `/api/v1`.
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/votes-stance/snapshot-info` | Frozen snapshot time, available models, default source/model and the known evaluator list |
-| `GET` | `/votes-stance/overview` | One descriptive row per contribution (vote share, favor share, counts) for the scatter and table |
+| `GET` | `/votes-stance/overview?universe=` | One descriptive row per contribution (vote share, favor share, counts) for the scatter and table; `universe` is `shared` (default) or `all` |
 | `GET` | `/contributions/{id}/votes-stance` | Vote counts and rolled-up comment stance for one contribution |
-| `GET` | `/votes-stance/summary` | Overall summary (gold only): the pre-registered headline plus the exploratory shared-contributions block |
+| `GET` | `/votes-stance/summary` | Votes-vs-stance headline (gold only), computed over the shared contributions |
 | `GET` | `/contributions/{id}/votes-stance/key-messages` | Per-key-message gold agreement/disagreement for one contribution |
 | `GET` | `/votes-stance/key-messages/overview?limit=` | Most agreed-with and most rejected gold key messages (`limit` 1–100, default 20) |
 
@@ -146,22 +146,30 @@ model's predictions; the `model` query param is then required) or `live`
 an optional `evaluator` query param restricts to one annotator. An unknown
 `model` or `evaluator` returns 400; an unknown contribution returns 404.
 
+`/votes-stance/overview` also takes `universe`: `shared` (the default) restricts
+the rows to the shared contributions (those with both a thumbs vote and a
+comment carrying a clear stance — 80 on the `20261105` export), while `all` keeps
+every contribution (115). `all` exists for debugging; the UI always uses the
+default `shared` set. An unknown `universe` returns 400 (422 at the route, which
+validates it against the allowed literal).
+
 #### Gold-only summary and key-message endpoints
 
 The last three endpoints are **gold (hand-label) only**: they take no `source`,
 `model` or `evaluator` parameters and always read the frozen gold labels. The UI
 likewise exposes no source/model selectors for these views.
 
-- `GET /votes-stance/summary` returns `overall` (the **pre-registered** headline,
-  copied verbatim from the frozen export — favor vs. thumbs-up share, the point
-  difference and its 90% interval) and `shared` (the **not pre-registered**
-  shared-contributions block, which carries its own `pre_registered: false` flag
-  and a note). Either may be `null` for an older export that predates these
-  blocks. The `shared` block additionally carries a derived `counts` sub-object
-  (pooled thumbs and comment-stance totals over the shared set, plus the two
-  shares) that the frontend draws its two stacked "shared ideas" bars from; it is
-  computed from the export parquets at serve time and is `null` for an export
-  whose shared block predates this feature.
+- `GET /votes-stance/summary` returns `{snapshot_utc, headline}`. The whole
+  votes-vs-stance view runs on the **shared contributions** — those with both at
+  least one thumbs vote and at least one gold comment carrying a clear stance (on
+  the `20261105` export, 80 contributions). `headline` is the pooled
+  thumbs-vs-comment-stance picture over that set: the thumbs and comment-stance
+  counts, the favour and thumbs-up shares, the pooled gap and its 90% interval, a
+  secondary unweighted gap, and an `equivalence` verdict. The verdict reads the
+  pooled 90% interval against a ±10 pp band: `equivalent` when the interval lies
+  wholly inside the band, `not_equivalent` when it lies wholly outside on one
+  side, `undecided` otherwise. `headline` is `null` for an older export that
+  predates the shared-contributions block.
 - `GET /contributions/{id}/votes-stance/key-messages` lists one entry per gold
   key message of the contribution, in first-appearance order, with in-favour /
   against / neutral comment counts and the comment texts behind each count. An
@@ -189,7 +197,9 @@ likewise exposes no source/model selectors for these views.
   pointing `PARQUET_PATH` at a different model would shift the displayed text and
   make every highlight point at the wrong passage.
 - `GET /votes-stance/key-messages/overview` returns `most_agreed` and
-  `most_rejected` lists.
+  `most_rejected` lists. Only key messages of the shared contributions are
+  ranked, so the overview runs on the same contribution set as the rest of the
+  view.
 
 **Thin-data rule.** A key message is included in the overview only when it has at
 least **three** comments carrying a clear stance (in favour or against);
@@ -229,27 +239,25 @@ hash-verified against the completion marker on load:
 If the directory or marker is missing the view is simply unavailable (the
 frontend hides the panel).
 
-The summary carries two blocks that back `GET /votes-stance/summary`:
+The summary's **`shared_contributions`** block backs `GET /votes-stance/summary`.
+It restricts both sides to the shared contributions — those having both a thumbs
+vote and a clear-stance comment — and carries the pooled and unweighted gaps,
+each with its 90% interval, plus the bootstrap parameters (`n`, `seed`) those
+figures were resampled with. From it the backend builds the `headline` response
+(`app.votes_stance.headline_summary_block`): it reads the pooled/unweighted gaps
+and intervals straight from the block, derives the pooled thumbs
+(`vote_pro`/`vote_contra`) and comment-stance (`favor`/`against`/`neutral`/`mixed`)
+counts over the shared set from the export parquets
+(`app.votes_stance._shared_pooled_counts`), and computes the `equivalence`
+verdict by reading the pooled 90% interval against the ±10 pp band
+(`EQUIVALENCE_MARGIN_PP`). On the `20261105` export (`VOTE_STANCE_EXPORT_DIR` in
+`docker-compose`) the shared set is the 80 contributions that have both thumbs
+and a clear comment: 654/93 thumbs, 129/27 directional comments, plus 44 neutral
+and 8 mixed comments that are counted but excluded from `favor_share`. See
+`stance-detection-app/docs/votes_stance_key_messages_note.md` for the wider
+analysis context.
 
-- **`overall_summary`** — the **pre-registered** headline figures, copied
-  verbatim from the frozen vote-ratio analysis summary and never recomputed
-  (`pre_registered: true`).
-- **`shared_contributions`** — an **exploratory, not pre-registered** comparison
-  that restricts both sides to the contributions having both a thumbs vote and a
-  clear-stance comment (`pre_registered: false`, with its own note). See
-  `stance-detection-app/docs/votes_stance_key_messages_note.md` for why this does
-  not replace the pre-registered result. At serve time the backend also derives a
-  `counts` sub-object for this block (`app.votes_stance._shared_pooled_counts`):
-  the pooled thumbs (`vote_pro`/`vote_contra`) and comment-stance
-  (`favor`/`against`/`neutral`/`mixed`) totals over the shared set, plus
-  `vote_share` and `favor_share`. These back the two "shared ideas" stacked bars
-  in the UI. On the `20261105` export (`VOTE_STANCE_EXPORT_DIR` in
-  `docker-compose`) the shared set is the 80 contributions that have both thumbs
-  and a clear comment: 654/93 thumbs, 129/27 directional comments, plus 44
-  neutral and 8 mixed comments that are counted but excluded from `favor_share`.
-
-Both blocks are optional; an older export without them makes the respective
-field `null`.
+The block is optional; an older export without it makes `headline` `null`.
 
 To refresh the export, run the exporter in the `stance-detection-app` repo and
 copy its files into this backend:

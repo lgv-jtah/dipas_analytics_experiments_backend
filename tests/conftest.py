@@ -113,7 +113,7 @@ _SHARED_CONTRIBUTIONS = {
 
 def _write_export(directory, snapshot_utc="20260102T030405060708Z",
                   include_key_messages=True, include_summary_blocks=True,
-                  include_spans=True):
+                  include_spans=True, extra_key_message_rows=()):
     """Write a complete, hash-marked synthetic export into ``directory``.
 
     Args:
@@ -125,6 +125,10 @@ def _write_export(directory, snapshot_utc="20260102T030405060708Z",
             shared-contributions blocks (set False for an older export).
         include_spans: Write the per-key-message span artifact (set False to
             simulate an export produced before highlights existed).
+        extra_key_message_rows: Additional ``(contribution_id, key_message,
+            comment_text, reference_label)`` tuples appended to the key-message
+            artifact, so a test can add key messages (e.g. on a non-shared
+            contribution) without disturbing the base fixture.
     """
     directory.mkdir(parents=True, exist_ok=True)
     rows = []
@@ -178,7 +182,9 @@ def _write_export(directory, snapshot_utc="20260102T030405060708Z",
                 "comment_text": comment,
                 "reference_label": label,
             }
-            for cid, key_message, comment, label in _KEY_MESSAGE_ROWS
+            for cid, key_message, comment, label in (
+                list(_KEY_MESSAGE_ROWS) + list(extra_key_message_rows)
+            )
         ]
         key_messages_path = directory / votes_stance.KEY_MESSAGES_FILE
         pd.DataFrame(key_message_rows).to_parquet(key_messages_path, index=False)

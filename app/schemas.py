@@ -208,6 +208,7 @@ class DatasetInfoOut(BaseModel):
 # ---------------------------------------------------------------------------
 
 VotesStanceSource = Literal["gold", "live", "model"]
+VotesStanceUniverse = Literal["shared", "all"]
 
 
 class VotesBlock(BaseModel):
@@ -282,29 +283,14 @@ class SnapshotInfoOut(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Votes-vs-stance overall summary schemas (gold only)
+# Votes-vs-stance headline summary schemas (shared contributions, gold only)
 # ---------------------------------------------------------------------------
 
 
-class OverallCI90(BaseModel):
-    """The 90% interval of the pre-registered point difference."""
+class HeadlineCI90(BaseModel):
+    """A 90% interval of a shared-contributions gap, in percentage points."""
     low: float
     high: float
-    equivalent: bool
-
-
-class OverallPrimary(BaseModel):
-    """The pre-registered headline figures, copied verbatim from the export."""
-    favor: int
-    against: int
-    neutral: int
-    mixed: int
-    favor_share: float
-    vote_pro: int
-    vote_contra: int
-    vote_share: float
-    difference_pp: float
-    ci90: OverallCI90
 
 
 class NoClearStance(BaseModel):
@@ -314,62 +300,59 @@ class NoClearStance(BaseModel):
     mixed: int
 
 
-class OverallSummaryOut(BaseModel):
-    """The pre-registered thumbs-vs-comment-stance headline block."""
-    pre_registered: bool
-    primary: OverallPrimary
-    n_comments: int
-    no_clear_stance: NoClearStance
-    n_contributions_with_votes: int
-    interpretation_rules: str
-
-
-class SharedCI90(BaseModel):
-    """A 90% range for one exploratory shared-contributions figure."""
-    low: float
-    high: float
-
-
-class SharedBlock(BaseModel):
-    """One shared-contributions gap (pooled or unweighted) with its range."""
-    difference_pp: float
-    ci90: SharedCI90
-
-
-class SharedCounts(BaseModel):
-    """Pooled comment/vote counts over the shared set, for the two stacked bars."""
-    vote_pro: int
-    vote_contra: int
-    # 100 * vote_pro / (vote_pro + vote_contra), or None when that total is 0.
-    vote_share: float | None
+class HeadlinePrimary(BaseModel):
+    """The pooled thumbs-vs-comment-stance figures over the shared set."""
     favor: int
     against: int
     neutral: int
     mixed: int
     # 100 * favor / (favor + against) (mixed/neutral excluded), or None when 0.
     favor_share: float | None
-    n_contributions: int
+    vote_pro: int
+    vote_contra: int
+    # 100 * vote_pro / (vote_pro + vote_contra), or None when that total is 0.
+    vote_share: float | None
+    difference_pp: float
+    ci90: HeadlineCI90
 
 
-class SharedContributionsOut(BaseModel):
-    """The exploratory, not-pre-registered shared-contributions block."""
+class HeadlineBlock(BaseModel):
+    """One shared-contributions gap (the unweighted side) with its 90% range."""
+    difference_pp: float
+    ci90: HeadlineCI90
+
+
+class EquivalenceOut(BaseModel):
+    """The equivalence verdict for the headline gap against the +/- margin."""
+    margin_pp: float
+    inside_90: bool
+    # equivalent | not_equivalent | undecided, or None when the interval is absent.
+    verdict: str | None
+
+
+class BootstrapOut(BaseModel):
+    """The bootstrap parameters the frozen gap/interval were resampled with."""
+    n: int
+    seed: int
+
+
+class HeadlineOut(BaseModel):
+    """The shared-contributions headline block (gold only, not pre-registered)."""
     pre_registered: bool
-    note: str
-    thumbs_side_contributions: int
-    comment_side_contributions: int
-    both_sides_contributions: int
-    pooled: SharedBlock
-    unweighted: SharedBlock
-    # Derived pooled counts the UI draws the two stacked bars from; None for an
-    # export whose shared block predates this feature.
-    counts: SharedCounts | None = None
+    primary: HeadlinePrimary
+    unweighted: HeadlineBlock
+    n_comments: int
+    no_clear_stance: NoClearStance
+    n_contributions: int
+    equivalence: EquivalenceOut
+    bootstrap: BootstrapOut
 
 
 class VotesStanceSummaryOut(BaseModel):
-    """The overall votes-vs-stance summary: pre-registered plus exploratory."""
+    """The votes-vs-stance summary: the shared-contributions headline block."""
     snapshot_utc: str | None
-    overall: OverallSummaryOut | None
-    shared: SharedContributionsOut | None
+    # None for an older export whose summary carries no shared-contributions block.
+    headline: HeadlineOut | None
 
 
 # ---------------------------------------------------------------------------
