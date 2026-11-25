@@ -103,13 +103,26 @@ def test_contribution_panel_model_differs_from_gold(export_dir):
     assert panel["comments"]["model"] == "base"
 
 
-def test_overview_rows(export_dir):
+def test_overview_rows_shared_default(export_dir):
+    # Default universe is "shared": only contribution 10 (a vote + a directional
+    # comment). Contribution 20 has no directional comment, so it is excluded.
     rows = votes_stance.overview(source="gold")
-    assert [r["contribution_id"] for r in rows] == [10, 20]
+    assert [r["contribution_id"] for r in rows] == [10]
     row10 = rows[0]
     assert row10["thumbs_up_share"] == 0.7
     assert row10["comment_favor_share"] == 0.5
     assert row10["counts"] == {"favor": 1, "against": 1, "neutral": 0, "mixed": 0}
+
+
+def test_overview_rows_universe_all(export_dir):
+    # universe="all" keeps every contribution, including non-shared cid 20.
+    rows = votes_stance.overview(source="gold", universe="all")
+    assert [r["contribution_id"] for r in rows] == [10, 20]
+
+
+def test_overview_bad_universe_raises(export_dir):
+    with pytest.raises(ValueError):
+        votes_stance.overview(source="gold", universe="bogus")
 
 
 # --------------------------------------------------------------------------
@@ -273,10 +286,18 @@ def test_route_contribution_panel(export_dir, client):
 
 
 def test_route_overview(export_dir, client):
+    # Default universe is "shared": only the one shared contribution (cid 10).
     resp = client.get("/api/v1/votes-stance/overview?source=gold")
     assert resp.status_code == 200
     rows = resp.json()
-    assert len(rows) == 2
+    assert [r["contribution_id"] for r in rows] == [10]
+    # universe=all returns every contribution.
+    resp_all = client.get("/api/v1/votes-stance/overview?source=gold&universe=all")
+    assert resp_all.status_code == 200
+    assert len(resp_all.json()) == 2
+    # An unknown universe is rejected by the Literal query type with 422.
+    resp_bad = client.get("/api/v1/votes-stance/overview?source=gold&universe=bogus")
+    assert resp_bad.status_code == 422
 
 
 def test_route_bad_source_422(export_dir, client):
@@ -308,7 +329,8 @@ def test_route_overview_live_coverage(export_dir, loaded_model_df, client, db_se
         db_session, contribution_id=20, key_message="kmC1", comment_text="comment C",
         verdict="correct", evaluator="alice",
     )
-    resp = client.get("/api/v1/votes-stance/overview?source=live")
+    # cid 20 is not shared, so use universe=all to keep it in the rows.
+    resp = client.get("/api/v1/votes-stance/overview?source=live&universe=all")
     assert resp.status_code == 200
     row20 = next(r for r in resp.json() if r["contribution_id"] == 20)
     assert row20["live_pairs_verified"] == 1
@@ -334,54 +356,76 @@ def test_route_unknown_evaluator_400(export_dir, client, db_session):
 
 
 # --------------------------------------------------------------------------
-# Overall summary blocks (gold only)
+# Shared set, equivalence verdict and headline (gold only)
 # --------------------------------------------------------------------------
 
 
-def test_overall_summary_block_verbatim(export_dir):
-    overall = votes_stance.overall_summary_block()
-    assert overall["pre_registered"] is True
-    assert overall["primary"]["favor"] == 5
-    assert overall["no_clear_stance"] == {"total": 2, "neutral": 1, "mixed": 1}
-    assert overall["n_contributions_with_votes"] == 4
+def test_shared_contribution_ids(export_dir):
+    # Only contribution 10 is shared: it has a thumbs vote (7/3) and a
+    # directional comment (favor + against). Contribution 20 has a vote but only
+    # neutral/mixed comments, so it never qualifies.
+    export = votes_stance._load_export()
+    assert votes_stance.shared_contribution_ids(export) == {"10"}
 
 
-def test_shared_contributions_block_flagged_not_pre_registered(export_dir):
-    shared = votes_stance.shared_contributions_block()
-    assert shared["pre_registered"] is False
-    assert shared["both_sides_contributions"] == 2
-    assert shared["pooled"]["difference_pp"] == -5.0
+@pytest.mark.parametrize(
+    "low, high, expected_verdict, expected_inside",
+    [
+        # Wholly inside the band -> equivalent (and inside_90 True).
+        (-5.0, 5.0, "equivalent", True),
+        # On both band edges -> still inside (bounds are inclusive).
+        (-10.0, 10.0, "equivalent", True),
+        # Straddling an edge -> undecided.
+        (-11.0, 3.0, "undecided", False),
+        (-3.0, 11.0, "undecided", False),
+        # Wholly outside on one side -> not_equivalent.
+        (11.0, 15.0, "not_equivalent", False),
+        (-15.0, -11.0, "not_equivalent", False),
+        # Just past an edge -> not_equivalent (strict boundary).
+        (10.5, 12.0, "not_equivalent", False),
+        # Missing bounds -> no verdict.
+        (None, 5.0, None, False),
+        (-5.0, None, None, False),
+    ],
+)
+def test_equivalence_verdict(low, high, expected_verdict, expected_inside):
+    result = votes_stance._equivalence_verdict(low, high, 10.0)
+    assert result["margin_pp"] == 10.0
+    assert result["verdict"] == expected_verdict
+    assert result["inside_90"] is expected_inside
 
 
-def test_summary_blocks_none_for_legacy_export(legacy_export_dir):
-    # An older export without the blocks still loads; the blocks are just None.
-    assert votes_stance.overall_summary_block() is None
-    assert votes_stance.shared_contributions_block() is None
+def test_headline_summary_block(export_dir):
+    # Shared set is {10}: favor 1 / against 1, votes 7/3. The pooled gap and its
+    # interval come verbatim from the synthetic shared-contributions block.
+    headline = votes_stance.headline_summary_block()
+    assert headline["pre_registered"] is False
+    primary = headline["primary"]
+    assert (primary["favor"], primary["against"]) == (1, 1)
+    assert (primary["neutral"], primary["mixed"]) == (0, 0)
+    assert (primary["vote_pro"], primary["vote_contra"]) == (7, 3)
+    assert primary["vote_share"] == 70.0
+    assert primary["favor_share"] == 50.0
+    assert primary["difference_pp"] == -5.0
+    assert primary["ci90"] == {"low": -10.0, "high": 1.0}
+    assert headline["unweighted"] == {
+        "difference_pp": -4.0,
+        "ci90": {"low": -9.0, "high": 2.0},
+    }
+    assert headline["n_comments"] == 2
+    assert headline["no_clear_stance"] == {"total": 0, "neutral": 0, "mixed": 0}
+    assert headline["n_contributions"] == 1
+    # ci90 [-10, 1] with margin 10: lower bound sits on the band edge, upper bound
+    # inside -> wholly inside -> equivalent.
+    assert headline["equivalence"]["verdict"] == "equivalent"
+    assert headline["equivalence"]["inside_90"] is True
+    assert headline["equivalence"]["margin_pp"] == 10.0
+    assert headline["bootstrap"] == {"n": 10, "seed": 1}
 
 
-def test_shared_contributions_block_includes_derived_counts(export_dir):
-    # The verbatim block is returned with a derived ``counts`` sub-dict. On the
-    # synthetic export only contribution 10 is shared (cid 20 has no directional
-    # comment), so the counts are that single contribution's figures.
-    shared = votes_stance.shared_contributions_block()
-    counts = shared["counts"]
-    assert counts["n_contributions"] == 1
-    assert counts["favor"] == 1
-    assert counts["against"] == 1
-    assert counts["neutral"] == 0
-    assert counts["mixed"] == 0
-    assert counts["vote_pro"] == 7
-    assert counts["vote_contra"] == 3
-    assert counts["vote_share"] == 70.0
-    assert counts["favor_share"] == 50.0
-    # The verbatim figures are still present alongside the counts.
-    assert shared["pre_registered"] is False
-    assert shared["both_sides_contributions"] == 2
-
-
-def test_shared_counts_absent_for_legacy_export(legacy_export_dir):
-    # No shared block at all on an older export -> no counts to derive.
-    assert votes_stance.shared_contributions_block() is None
+def test_headline_summary_block_none_for_legacy_export(legacy_export_dir):
+    # An older export without the shared-contributions block has no headline.
+    assert votes_stance.headline_summary_block() is None
 
 
 def test_shared_pooled_counts_empty_shared_set_gives_none_shares():
@@ -577,6 +621,37 @@ def test_key_message_overview_empty_for_legacy_export(legacy_export_dir):
     assert overview == {"most_agreed": [], "most_rejected": []}
 
 
+def test_key_message_overview_restricts_to_shared_and_threshold(tmp_path, monkeypatch):
+    # Extra key messages: km-20-b would rank first (3 in favour) but lives on the
+    # non-shared contribution 20, and km-10-c has only 2 stance comments. The
+    # overview must drop the first by the shared restriction and the second by
+    # the stance-count threshold, leaving only the shared, rankable key messages.
+    from tests.conftest import _write_export
+
+    directory = tmp_path / "votes_stance_kmrestrict"
+    extra = [
+        (20, "km-20-b", "kmY comment 1", "in_favor"),
+        (20, "km-20-b", "kmY comment 2", "in_favor"),
+        (20, "km-20-b", "kmY comment 3", "in_favor"),
+        (10, "km-10-c", "kmC comment 1", "in_favor"),
+        (10, "km-10-c", "kmC comment 2", "in_favor"),
+    ]
+    _write_export(directory, extra_key_message_rows=extra)
+    monkeypatch.setattr(votes_stance, "VOTE_STANCE_EXPORT_DIR", directory)
+    votes_stance._load_export.cache_clear()
+    try:
+        overview = votes_stance.key_message_overview()
+        names = [i["key_message"] for i in overview["most_agreed"]]
+        # km-20-b is excluded because contribution 20 is not shared.
+        assert "km-20-b" not in names
+        # km-10-c is excluded because it has fewer than three stance comments.
+        assert "km-10-c" not in names
+        # The shared, rankable key messages remain, most agreed first.
+        assert names == ["km-10-a", "km-10-b"]
+    finally:
+        votes_stance._load_export.cache_clear()
+
+
 # --------------------------------------------------------------------------
 # Routes (gold only; no source/model/evaluator params)
 # --------------------------------------------------------------------------
@@ -587,19 +662,30 @@ def test_route_votes_stance_summary(export_dir, client):
     assert resp.status_code == 200
     body = resp.json()
     assert body["snapshot_utc"] == "20260102T030405060708Z"
-    assert body["overall"]["pre_registered"] is True
-    assert body["overall"]["primary"]["difference_pp"] == -8.6
-    assert body["shared"]["pre_registered"] is False
-    assert body["shared"]["both_sides_contributions"] == 2
-    # The derived pooled counts the bars are drawn from are surfaced too.
-    counts = body["shared"]["counts"]
-    assert counts["n_contributions"] == 1
-    assert counts["vote_pro"] == 7
-    assert counts["vote_contra"] == 3
-    assert counts["favor"] == 1
-    assert counts["against"] == 1
-    assert counts["vote_share"] == 70.0
-    assert counts["favor_share"] == 50.0
+    # The response carries only the headline block now; no overall/shared keys.
+    assert set(body) == {"snapshot_utc", "headline"}
+    headline = body["headline"]
+    assert headline["pre_registered"] is False
+    primary = headline["primary"]
+    assert (primary["vote_pro"], primary["vote_contra"]) == (7, 3)
+    assert (primary["favor"], primary["against"]) == (1, 1)
+    assert primary["vote_share"] == 70.0
+    assert primary["favor_share"] == 50.0
+    assert primary["difference_pp"] == -5.0
+    assert primary["ci90"] == {"low": -10.0, "high": 1.0}
+    assert headline["n_contributions"] == 1
+    assert headline["n_comments"] == 2
+    assert headline["no_clear_stance"] == {"total": 0, "neutral": 0, "mixed": 0}
+    assert headline["unweighted"]["difference_pp"] == -4.0
+    assert headline["equivalence"]["verdict"] == "equivalent"
+    assert headline["bootstrap"] == {"n": 10, "seed": 1}
+
+
+def test_route_votes_stance_summary_headline_null_for_legacy(legacy_export_dir, client):
+    resp = client.get("/api/v1/votes-stance/summary")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["headline"] is None
 
 
 def test_route_contribution_key_messages(export_dir, client):

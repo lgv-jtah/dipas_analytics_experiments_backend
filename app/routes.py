@@ -32,6 +32,7 @@ from app.schemas import (
     VotesStanceOverviewRow,
     VotesStanceSource,
     VotesStanceSummaryOut,
+    VotesStanceUniverse,
 )
 
 router = APIRouter()
@@ -690,13 +691,19 @@ def get_votes_stance_overview(
     source: VotesStanceSource = Query(default=votes_stance.DEFAULT_SOURCE),
     model: str | None = Query(default=None),
     evaluator: str | None = Query(default=None),
+    universe: VotesStanceUniverse = Query(default=votes_stance.DEFAULT_UNIVERSE),
     db: Session = Depends(get_db),
 ):
-    """Return one descriptive row per contribution for the scatter and table."""
+    """Return one descriptive row per contribution for the scatter and table.
+
+    `universe` defaults to `shared` - only the shared contributions (those with
+    both a thumbs vote and a comment carrying a clear stance). Pass `all` to get
+    every contribution.
+    """
     _check_evaluator(db, evaluator)
     try:
         return votes_stance.overview(
-            source=source, model=model, db=db, evaluator=evaluator
+            source=source, model=model, db=db, evaluator=evaluator, universe=universe
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -705,24 +712,23 @@ def get_votes_stance_overview(
 @router.get(
     "/votes-stance/summary",
     response_model=VotesStanceSummaryOut,
-    summary="Overall votes-vs-comment-stance summary (gold only)",
+    summary="Votes-vs-comment-stance headline (shared contributions, gold only)",
     tags=["votes-stance"],
 )
 def get_votes_stance_summary():
-    """Return the overall summary: the pre-registered headline plus the
-    exploratory shared-contributions block.
+    """Return the shared-contributions headline block.
 
     This view is gold-only: it takes no source, model or evaluator parameters.
-    The ``overall`` block is the pre-registered figure, copied verbatim from the
-    frozen export; the ``shared`` block is explicitly not pre-registered (it
-    carries its own flag and note). Either may be ``null`` for an older export
-    that predates these blocks.
+    The whole votes-vs-stance page runs on the shared contributions (those with
+    both a thumbs vote and a comment carrying a clear stance), so the headline is
+    the pooled thumbs-vs-comment-stance picture over that set with its gap, 90%
+    interval and equivalence verdict. ``headline`` is ``null`` for an older
+    export that predates the shared-contributions block.
     """
     export = votes_stance._load_export()
     return VotesStanceSummaryOut(
         snapshot_utc=export["summary"].get("snapshot_utc"),
-        overall=votes_stance.overall_summary_block(),
-        shared=votes_stance.shared_contributions_block(),
+        headline=votes_stance.headline_summary_block(),
     )
 
 
